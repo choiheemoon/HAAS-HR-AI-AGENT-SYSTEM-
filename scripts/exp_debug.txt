@@ -1,0 +1,223 @@
+_get_experience_blocks count: 5
+  block[0] first line: ประวัติการทํางาน
+  block[1] first line: เมษายน
+  block[2] first line: มีนาคม
+  block[3] first line: มีนาคม
+  block[4] first line: มิถุนายน
+exp length: 143
+ประวัติการทํางาน
+/
+ฝกงาน
+ASIA PACIFIC CIS (THAILAND)
+พฤษภาคม
+2565
+-
+ปจจุบัน
+ประเวศ.
+กรุงเทพมหานคร
+QA Engineer & New Project
+27,000
+หัวหนางาน
+
+detailed count: 1
+company_name: ASIA PACIFIC CIS (THAILAND)
+period: พฤษภาคม 2565 - ปจจุบัน
+work_location: ประเวศ.
+position: QA Engineer & New Project
+salary: 27,000
+level: หัวหนางาน
+department: 
+responsibilities: 
+
+scattered_blocks: 3
+  scattered[0] first line: Bangchan General Assembly
+  scattered[1] first line: กุลธร
+  scattered[2] first line: Thailand
+
+full parse exp_entries: 4
+
+--- entry 1 ---
+company_name: ASIA PACIFIC CIS (THAILAND)
+period: พฤษภาคม 2565 - ปจจุบัน
+work_location: ประเวศ.
+position: QA Engineer & New Project
+salary: 27,000
+level: หัวหนางาน
+department: 
+responsibilities: - Support New Project PPAP Document
+- 
+ทํา
+ Flow Chat and Control Plan
+- Supplier Audit
+- Co Check Part Program CMM
+- 
+เขียน
+ Program CMM 
+วัดงาน
+- 
+ตรวจสอบคุณภาพงานภายใน
+ Line 
+ผลิต
+- 
+วิเคราะหปgญหางานรวมกับฝiายผลิต
+ 
+- 
+ติดตาม
+ New Part 
+ตรวจสอบวิธีการ
+ 
+และปรับปรุงกระบวนการ
+- 
+กําหนด
+ Standard Spec 
+ตางๆใน
+ Data Sheet
+- 
+จัดทําเอกสาร
+ 
+เชน
+ WI, Q-Point, 
+แผนฝกอบรมตางๆ
+ 
+ในหนวยงาน
+- 
+ทําเอกสาร
+ ...
+
+--- entry 2 ---
+company_name: Bangchan General Assembly
+period: 
+work_location: กุมภาพันธ
+position: Supervisor
+salary: 23,570
+level: หัวหนางาน
+department: 
+responsibilities: - 
+วัดและวิเคราะห
+' Body
+รถ
+ 
+ดวย
+ CMM
+- 
+เขียนโปรแกรม
+ CMM 
+วัด
+ 
+ชิ้นสวนและ
+ Body 
+รถยนต
+- Setting Jig, Fixture Gauge Welding Line BMW
+- 
+จัดทําเอกสารตางๆเชน
+ WI, Q-Point
+- 
+กําหนดจุดตรวจสอบสําหรับ
+ Supplier 
+- 
+ควบคุมคุณภาพและแกปญหาในการผลิต
+ Welding Line BMW
+- Improvements
+ตําแหนง
+เงินเดือน
+ระดับ
+
+--- entry 3 ---
+company_name: กุลธร
+period: 
+work_location: เมททัลโปรดักส
+position: 2562
+salary: 123
+level: ซ.ฉลองกรุง
+department: 
+responsibilities: - 
+ทํา
+ Flow Chat and Control Plan
+- 
+ตรวจสอบงาน
+ Forging, CNC, Press, HeatTreatment
+- Support 
+เอกสาร
+ PPAP, APQP Team Submit 
+ลูกคา
+- Supplier Audit
+- 
+เขียนโปรแกรมวัดงาน
+ Cmm 
+และ
+ Contour
+- 
+กําหนดเครื่องมือวัดและจุดตรวจสอบ
+ 
+สําหรับ
+ QC
+- 
+ตรวจสอบคุณภาพงานภายใน
+ Line 
+ผลิต
+- 
+วิเคราะหปgญหางานรวมกับฝiายผลิต
+ 
+- Support 
+เอกสาร
+ 
+เชน
+ WI, Q-Point, 
+แผนฝกอบรมตางๆ
+ 
+ในหนวยงาน
+- 
+ทําเอกสาร
+ Inspec...
+
+--- entry 4 ---
+company_name: FCC Thailand (Subcontract)
+period: 
+work_location: (Subcontract)
+position: 2552
+salary: 286
+level: ถ.
+department: 
+responsibilities: - 
+เขียนแบบ
+ 
+ชิ้นสวนเครื่องกล
+ Auto cad , Solid work
+- 
+ปรับ
+ Set
+เครื่อง
+ 
+จักร
+ , 
+ทํา
+ PM 
+เครื่อง
+ 
+- 
+ควบคุมเครื่องจักร
+ 
+เชื่อมเลเซอร
+ Robot , 
+เครื่อง
+Spot , 
+เครื่อง
+Press
+- 
+เปลี่ยนแมพิมพ
+ , Jig
+- 
+ซอมเครื่องทั่วไป
+- 
+ปรับแตงแมพิมพกอนนําไปขึ้นผลิต
+หลักสูตร
+การจัดการและการสอบเทียบเครื่องมือวัด
+ประกาศนียบัตร
+/
+วุฒิบัตร
+Calibration of Measuring Instruments
+หลักสูตร
+GD&T
+ประกาศนียบัตร
+/
+วุฒิ...

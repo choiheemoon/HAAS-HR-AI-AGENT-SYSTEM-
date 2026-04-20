@@ -1,0 +1,10 @@
+---
+description: Avoid delete-then-full-reinsert persistence patterns; prefer UPSERT and diffs.
+alwaysApply: true
+---
+
+# 데이터 저장·동기화 패턴
+
+- **삭제 후 전체 재삽입(delete-all → insert-all)** 패턴은 사용하지 않는다. PK·FK·외부 참조·감사 추적이 깨지고 동시성 문제를 부른다.
+- 대신 **행 단위 또는 자연키 기준 UPSERT**(있으면 UPDATE, 없으면 INSERT), 페이로드에 없는 행만 **선별 DELETE**, 자식 행은 **동기화(merge)·CASCADE** 등으로 맞춘다.
+- 대량 마이그레이션·시드 스크립트만 예외로 두되, 애플리케이션 런타임 비즈니스 로직에는 적용하지 않는다.

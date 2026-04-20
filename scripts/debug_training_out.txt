@@ -1,0 +1,36 @@
+form_type=2
+len(raw_text)=5258
+training_section len=746
+cert_section len=1431
+training_cert_merged len=2179
+entries count=5
+
+--- 1 ---
+institution: อินซเทค เมโทรโลจิคอล เซ็นเตอร
+period: มีนาคม 2566 - มีนาคม 2566
+course: การจัดการและการสอบเทียบเครื่องมือวัด
+certificate: Calibration of Measuring Instruments
+
+--- 2 ---
+institution: Accretech Thailand
+period: พฤศจิกายน 2565 - พฤศจิกายน 2565
+course: GD&T
+certificate: Geometric Dimension & Tolerance
+
+--- 3 ---
+institution: Quality Alliance (Thailand)
+period: ตุลาคม 2560 - ตุลาคม 2560
+course: IATF 16949 : 2016 Internal Audit
+certificate: IATF 16949 : 2016 Internal Audit
+
+--- 4 ---
+institution: Quality Alliance (Thailand)
+period: สิงหาคม 2560 - ตุลาคม 2560
+course: APQA , PPAP , MSA , FMEA , SPC
+certificate: Core Toos
+
+--- 5 ---
+institution: Mitutoyo
+period: สิงหาคม 2559 - กันยายน 2559
+course: การใช
+certificate: Calibration of Measuring Instruments

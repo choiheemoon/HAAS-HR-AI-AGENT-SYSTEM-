@@ -1,0 +1,236 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 근태/OT/수당관리: 가로·세로 스크롤 막대를 굵고 명확하게 */
+.attendance-status-inquiry-grid-scroll {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+}
+.attendance-status-inquiry-grid-scroll::-webkit-scrollbar {
+  height: 14px;
+  width: 14px;
+}
+.attendance-status-inquiry-grid-scroll::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 8px;
+}
+.attendance-status-inquiry-grid-scroll::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-radius: 8px;
+  border: 3px solid #e2e8f0;
+}
+.attendance-status-inquiry-grid-scroll::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+.attendance-status-inquiry-grid-scroll::-webkit-scrollbar-corner {
+  background: #e2e8f0;
+}
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 214, 219, 220;
+  --background-end-rgb: 255, 255, 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 0, 0, 0;
+    --background-end-rgb: 0, 0, 0;
+  }
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+      to bottom,
+      transparent,
+      rgb(var(--background-end-rgb))
+    )
+    rgb(var(--background-start-rgb));
+}
+
+/* 인사기록카드: PDF(html2pdf)도 getComputedStyle로 읽히도록 인쇄 전용이 아닌 규칙 사용 */
+.personnel-record-card thead tr:first-child {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+.personnel-record-card thead tr:nth-child(2) th,
+.personnel-record-card thead tr:nth-child(2) td {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+.personnel-record-card tbody tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+/* 카드(섹션) 단위: 한 페이지에 들어가면 잘리지 않도록 */
+.pr-pdf-avoid-break {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.personnel-record-card .pr-print-stack {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/*
+ * 재직·경력증명서: A4 세로 1페이지 본문 영역
+ * @page margin 8mm → 가로 194mm, 세로 이론값 281mm (html2pdf 픽셀 반올림 2페이지 방지로 280mm 고정)
+ * 화면 미리보기·html2pdf 동일 치수 (인쇄 미디어와 무관하게 적용)
+ */
+#personnel-record-print-root[data-print-layout='certificate'] {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  box-sizing: border-box;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-certificate-doc {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 194mm;
+  height: auto;
+  min-height: 280mm;
+  max-height: none;
+  margin-left: auto;
+  margin-right: auto;
+  overflow: visible;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  page-break-after: avoid;
+}
+
+/* 근로계약서: 다페이지 — 루트에 min-height·break-inside 고정을 두지 않음, 조항 블록 앞에서 새 페이지 */
+#personnel-record-print-root[data-print-layout='certificate'] .hr-certificate-doc[data-hr-cert-kind='laborContract'] {
+  min-height: 0;
+  break-inside: auto;
+  page-break-inside: auto;
+  page-break-after: auto;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-certificate-doc[data-hr-cert-kind='laborContract'] .hr-labor-contract-page-start {
+  break-before: page;
+  page-break-before: always;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-cert-inner {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-cert-top {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-cert-spacer {
+  flex: 1 1 auto;
+  min-height: 3mm;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-cert-footer {
+  flex: 0 0 auto;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-contract-page {
+  min-height: 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+#personnel-record-print-root[data-print-layout='certificate'] .hr-contract-page-break {
+  break-after: auto;
+  page-break-after: auto;
+}
+
+/* 인사기록카드: 해당 페이지에서 인쇄 시 카드 영역만 출력 */
+@media print {
+  @page {
+    size: A4;
+    margin: 8mm;
+  }
+
+  body:has(#personnel-record-print-root) * {
+    visibility: hidden;
+  }
+  body:has(#personnel-record-print-root) #personnel-record-print-root,
+  body:has(#personnel-record-print-root) #personnel-record-print-root * {
+    visibility: visible;
+  }
+  body:has(#personnel-record-print-root) #personnel-record-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: #fff !important;
+  }
+
+  #personnel-record-print-root .personnel-record-card {
+    font-size: 10.5pt;
+    line-height: 1.35;
+  }
+
+  #personnel-record-print-root .personnel-record-card thead {
+    display: table-header-group;
+  }
+
+  #personnel-record-print-root .personnel-record-card tbody {
+    display: table-row-group;
+  }
+
+  #personnel-record-print-root[data-print-layout='certificate'] {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    display: flex !important;
+    justify-content: center !important;
+  }
+
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-certificate-doc {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
+    font-size: 9.25pt;
+    line-height: 1.22;
+  }
+
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-certificate-doc[data-hr-cert-kind='laborContract'] {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    page-break-after: auto !important;
+    min-height: 0 !important;
+  }
+
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-certificate-doc[data-hr-cert-kind='laborContract'] .hr-labor-contract-page-start {
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-certificate-doc h1 {
+    font-size: 15pt;
+    letter-spacing: 0.18em;
+  }
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-cert-table {
+    font-size: 8.75pt;
+  }
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-cert-table input {
+    font-size: 8.75pt;
+  }
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-contract-page {
+    min-height: 0;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+  #personnel-record-print-root[data-print-layout='certificate'] .hr-contract-page-break {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+}

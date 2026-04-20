@@ -1,0 +1,9 @@
+{
+  "name": "hr-ai-agent",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build:frontend": "npm run build --prefix frontend"
+  }
+}
