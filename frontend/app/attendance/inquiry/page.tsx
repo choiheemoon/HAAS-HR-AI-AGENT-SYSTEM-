@@ -805,12 +805,58 @@ export default function AttendanceInquiryPage() {
         (pct) => setUploadProgress(pct)
       );
       const r = (data || {}) as Record<string, unknown>;
+      const ambiguousCards = Array.isArray(r.ambiguous_cards_sample)
+        ? (r.ambiguous_cards_sample as Array<Record<string, unknown>>)
+        : [];
+      const mappedCards = Array.isArray(r.mapped_cards_sample)
+        ? (r.mapped_cards_sample as Array<Record<string, unknown>>)
+        : [];
       const msg = [
         `파싱: ${Number(r.parsed_rows ?? 0)}건`,
         `등록: ${Number(r.inserted ?? 0)}건`,
         `중복 제외: ${Number(r.skipped_duplicate ?? 0)}건`,
         `카드 미매핑: ${Number(r.skipped_unknown_card ?? 0)}건`,
+        `카드 중복(다중 사용자) 제외: ${Number(r.skipped_ambiguous_card ?? 0)}건`,
         `형식오류: ${Number(r.malformed_rows ?? 0)}건`,
+        ...(mappedCards.length > 0
+          ? [
+              '',
+              '[카드번호-등록 사용자]',
+              ...mappedCards.slice(0, 20).map((it) => {
+                const cardNo = String(it.card_no ?? '-');
+                const users = Array.isArray(it.users) ? (it.users as Array<Record<string, unknown>>) : [];
+                const label = users
+                  .map((u) => {
+                    const companyName = String(u.company_name ?? '-');
+                    const empNo = String(u.employee_number ?? '-');
+                    const empName = String(u.employee_name ?? '-');
+                    return `${companyName}/${empNo}/${empName}`;
+                  })
+                  .join(', ');
+                return `${cardNo}: ${label || '-'}`;
+              }),
+            ]
+          : []),
+        ...(ambiguousCards.length > 0
+          ? [
+              '',
+              '[중복 카드번호 사용자 목록]',
+              ...ambiguousCards.map((it) => {
+                const cardNo = String(it.card_no ?? '-');
+                const cnt = Number(it.count ?? 0);
+                const users = Array.isArray(it.users) ? (it.users as Array<Record<string, unknown>>) : [];
+                const label = users
+                  .map((u) => {
+                    const companyName = String(u.company_name ?? '-');
+                    const empNo = String(u.employee_number ?? '-');
+                    const empName = String(u.employee_name ?? '-');
+                    return `${companyName}/${empNo}/${empName}`;
+                  })
+                  .join(', ');
+                return `${cardNo} (${cnt}건): ${label || '-'}`;
+              }),
+            ]
+          : []),
       ].join('\n');
       alert(msg);
       setUploadProgress(100);

@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, tuple_
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.attendance_standard import AttendanceShiftGroupMaster, AttendanceWorkCalendar
+from app.models.company import Company
 from app.models.attendance_time_day import AttendanceTimeDay
 from app.models.attendance_time_in_out import AttendanceTimeInOut
 from app.models.employee import Employee
@@ -508,16 +509,33 @@ class AttendanceTimeInOutService:
         if text is None:
             raise ValueError("파일 인코딩을 해석할 수 없습니다.")
 
+        company_name_by_id: Dict[int, str] = {}
+        for c in self.db.query(Company).filter(Company.id.in_(allowed)).all():
+            cid = int(c.id)
+            cname = (c.name_kor or c.name_eng or c.name_thai or c.company_code or str(cid)).strip()
+            company_name_by_id[cid] = cname
+
         emq = self.db.query(Employee).filter(or_(Employee.company_id.is_(None), Employee.company_id.in_(allowed)))
         if company_id is not None:
             emq = emq.filter(Employee.company_id == int(company_id))
         employees = emq.all()
-        card_to_emp: Dict[str, Employee] = {}
+        card_to_emps: Dict[str, List[Employee]] = defaultdict(list)
         for e in employees:
             card = str(getattr(e, "swipe_card", "") or "").strip()
             if not card:
                 continue
-            card_to_emp[card] = e
+            card_to_emps[card].append(e)
+
+        card_to_emp: Dict[str, Employee] = {}
+        ambiguous_card_to_emps: Dict[str, List[Employee]] = {}
+        for card, emps in card_to_emps.items():
+            if len(emps) == 1:
+                card_to_emp[card] = emps[0]
+                continue
+            ambiguous_card_to_emps[card] = sorted(
+                emps,
+                key=lambda x: ((x.employee_number or ""), int(x.id or 0)),
+            )
 
         parsed: List[Tuple[str, datetime]] = []
         malformed = 0
@@ -546,9 +564,12 @@ class AttendanceTimeInOutService:
                 "parsed_rows": 0,
                 "inserted": 0,
                 "skipped_unknown_card": 0,
+                "skipped_ambiguous_card": 0,
                 "skipped_duplicate": 0,
                 "malformed_rows": malformed,
                 "unknown_cards_sample": [],
+                "ambiguous_cards_sample": [],
+                "mapped_cards_sample": [],
             }
 
         # dedupe keys from DB first to avoid duplicate punches on repeated upload
@@ -574,9 +595,15 @@ class AttendanceTimeInOutService:
         now = datetime.utcnow()
         inserted = 0
         skipped_unknown = 0
+        skipped_ambiguous = 0
         skipped_dup = 0
         unknown_cards: Dict[str, int] = defaultdict(int)
+        ambiguous_cards: Dict[str, int] = defaultdict(int)
         for card_no, pdt in parsed:
+            if card_no in ambiguous_card_to_emps:
+                skipped_ambiguous += 1
+                ambiguous_cards[card_no] += 1
+                continue
             emp = card_to_emp.get(card_no)
             if not emp or not emp.id:
                 skipped_unknown += 1
@@ -610,14 +637,47 @@ class AttendanceTimeInOutService:
 
         self.db.commit()
         top_unknown = sorted(unknown_cards.items(), key=lambda x: (-x[1], x[0]))[:20]
+        top_ambiguous = sorted(ambiguous_cards.items(), key=lambda x: (-x[1], x[0]))[:20]
+
+        def _emp_meta(e: Employee) -> Dict[str, Any]:
+            cid = int(e.company_id) if e.company_id is not None else None
+            return {
+                "employee_id": int(e.id),
+                "employee_number": e.employee_number,
+                "employee_name": e.name,
+                "company_id": cid,
+                "company_name": company_name_by_id.get(cid, str(cid) if cid is not None else "-"),
+            }
+
+        mapped_cards_sample: List[Dict[str, Any]] = []
+        for c in sorted({card for card, _ in parsed})[:50]:
+            one = card_to_emp.get(c)
+            if one is None:
+                continue
+            mapped_cards_sample.append(
+                {
+                    "card_no": c,
+                    "users": [_emp_meta(one)],
+                }
+            )
         return {
             "ok": True,
             "filename": filename,
             "parsed_rows": len(parsed),
             "inserted": inserted,
             "skipped_unknown_card": skipped_unknown,
+            "skipped_ambiguous_card": skipped_ambiguous,
             "skipped_duplicate": skipped_dup,
             "malformed_rows": malformed,
             "unknown_cards_sample": [{"card_no": c, "count": n} for c, n in top_unknown],
+            "ambiguous_cards_sample": [
+                {
+                    "card_no": c,
+                    "count": n,
+                    "users": [_emp_meta(e) for e in ambiguous_card_to_emps.get(c, [])[:20]],
+                }
+                for c, n in top_ambiguous
+            ],
+            "mapped_cards_sample": mapped_cards_sample,
         }
 

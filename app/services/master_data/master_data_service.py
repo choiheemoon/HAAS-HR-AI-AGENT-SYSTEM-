@@ -35,6 +35,26 @@ class MasterDataService:
     
     def __init__(self, db: Session):
         self.db = db
+
+    def _assert_unique_swipe_card_in_company(
+        self,
+        *,
+        company_id: Optional[int],
+        swipe_card: Optional[str],
+        exclude_employee_id: Optional[int] = None,
+    ) -> None:
+        card = str(swipe_card or "").strip()
+        if company_id is None or not card:
+            return
+        q = self.db.query(Employee).filter(
+            Employee.company_id == company_id,
+            Employee.swipe_card == card,
+        )
+        if exclude_employee_id is not None:
+            q = q.filter(Employee.id != exclude_employee_id)
+        dup = q.first()
+        if dup:
+            raise ValueError("동일 회사에서 출입카드번호 중복입니다.")
     
     def create_employee(self, employee_data: Dict[str, Any], user_id: Optional[int] = None) -> Employee:
         """직원 정보 생성"""
@@ -55,6 +75,12 @@ class MasterDataService:
             )
             if dup:
                 raise ValueError("동일 회사에서 사번 중복입니다.")
+
+        # 회사 내 출입카드번호 중복 방지(값이 있을 때만)
+        self._assert_unique_swipe_card_in_company(
+            company_id=company_id,
+            swipe_card=employee_data.get("swipe_card"),
+        )
         
         # 주민등록번호 암호화
         if "resident_number" in employee_data:
@@ -104,6 +130,16 @@ class MasterDataService:
             )
             if dup:
                 raise ValueError("동일 회사에서 사번 중복입니다.")
+
+        # 회사 내 출입카드번호 중복 체크(요구사항)
+        if "company_id" in employee_data or "swipe_card" in employee_data:
+            target_company_id = employee_data.get("company_id", employee.company_id)
+            target_swipe_card = employee_data.get("swipe_card", employee.swipe_card)
+            self._assert_unique_swipe_card_in_company(
+                company_id=target_company_id,
+                swipe_card=target_swipe_card,
+                exclude_employee_id=employee_id,
+            )
 
         for key, value in employee_data.items():
             if hasattr(employee, key):
