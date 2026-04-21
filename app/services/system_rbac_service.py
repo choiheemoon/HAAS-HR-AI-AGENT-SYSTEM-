@@ -57,6 +57,7 @@ DEFAULT_APP_MENUS: Tuple[Tuple[str, str, int], ...] = (
     ("system-user-companies", "menu.systemUserCompanies", 201),
     ("system-role-groups", "menu.systemRoleGroups", 202),
     ("system-role-group-menus", "menu.systemRoleGroupMenus", 203),
+    ("system-template-generation", "menu.systemTemplateGeneration", 204),
 )
 
 

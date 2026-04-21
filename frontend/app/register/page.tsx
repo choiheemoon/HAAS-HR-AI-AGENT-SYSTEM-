@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { UserPlus, Mail, Lock, User, UserCircle } from 'lucide-react';
-import api from '@/lib/api';
-import { isAuthenticated } from '@/lib/auth';
+import api, { apiClient } from '@/lib/api';
+import { isAuthenticated, setToken, setUser } from '@/lib/auth';
 
 function parseApiError(err: any): string {
   const detail = err?.response?.data?.detail;
@@ -57,15 +57,36 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const response = await api.post('/api/v1/auth/register', {
+      await api.post('/api/v1/auth/register', {
         email: formData.email,
         username: formData.username,
         password: formData.password,
         full_name: formData.full_name || undefined,
       });
 
-      // 회원가입 성공 시 로그인 페이지로 이동
-      router.push('/login?registered=true');
+      // 회원가입 직후 자동 로그인
+      const params = new URLSearchParams();
+      // 사용자명은 중복 허용 정책이므로 자동로그인은 유니크한 이메일로 수행
+      params.append('username', formData.email);
+      params.append('password', formData.password);
+      const loginResponse = await api.post('/api/v1/auth/login', params.toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      });
+      setToken(loginResponse.data.access_token);
+
+      try {
+        const me = await apiClient.getAuthMe();
+        setUser(me.data);
+      } catch {
+        if (loginResponse.data.user) {
+          setUser(loginResponse.data.user);
+        }
+      }
+
+      // 환경설정 페이지로 이동
+      router.push('/onboarding/setup');
     } catch (err: any) {
       setError(parseApiError(err));
     } finally {

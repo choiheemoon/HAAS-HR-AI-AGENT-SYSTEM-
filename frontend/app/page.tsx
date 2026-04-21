@@ -57,6 +57,7 @@ import SystemUsersPage from '@/app/system/users/page';
 import SystemRoleGroupsPage from '@/app/system/role-groups/page';
 import SystemRoleGroupMenusPage from '@/app/system/role-group-menus/page';
 import SystemUserCompaniesPage from '@/app/system/user-companies/page';
+import SystemTemplateGenerationPage from '@/app/system/template-generation/page';
 import ChatPage from '@/app/chat/page';
 import { TabDataProvider } from '@/contexts/TabDataContext';
 import { useI18n } from '@/contexts/I18nContext';
@@ -119,6 +120,7 @@ const tabComponents: { [key: string]: React.ComponentType } = {
   'system-user-companies': SystemUserCompaniesPage,
   'system-role-groups': SystemRoleGroupsPage,
   'system-role-group-menus': SystemRoleGroupMenusPage,
+  'system-template-generation': SystemTemplateGenerationPage,
   chat: ChatPage,
 };
 
@@ -178,6 +180,7 @@ const tabLabels: { [key: string]: { labelKey: string; icon: any; step?: number }
   'system-user-companies': { labelKey: 'menu.systemUserCompanies', icon: Link2 },
   'system-role-groups': { labelKey: 'menu.systemRoleGroups', icon: Shield },
   'system-role-group-menus': { labelKey: 'menu.systemRoleGroupMenus', icon: Share2 },
+  'system-template-generation': { labelKey: 'menu.systemTemplateGeneration', icon: Database },
   chat: { labelKey: 'header.aiAssistant', icon: Bot },
 };
 

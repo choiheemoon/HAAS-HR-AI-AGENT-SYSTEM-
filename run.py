@@ -3,10 +3,11 @@ import uvicorn
 from app.config import settings
 
 if __name__ == "__main__":
-    # Windows에서 reload 모드가 문제를 일으킬 수 있으므로 비활성화
+    # 백엔드 파일 수정 시 자동 재시작(Hot Reload)
     uvicorn.run(
         "app.main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=False  # Windows에서 안정성을 위해 비활성화
+        reload=True,
+        reload_dirs=["app"],
     )

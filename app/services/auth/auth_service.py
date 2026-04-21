@@ -4,6 +4,8 @@ from sqlalchemy import or_
 from typing import Optional
 from datetime import datetime, timedelta
 import uuid
+import secrets
+import string
 from jose import JWTError, jwt
 import bcrypt
 from app.models.user import User
@@ -66,6 +68,11 @@ class AuthService:
             return payload
         except JWTError:
             return None
+
+    @staticmethod
+    def _generate_temporary_password(length: int = 10) -> str:
+        alphabet = string.ascii_letters + string.digits
+        return "".join(secrets.choice(alphabet) for _ in range(max(8, length)))
     
     def register_user(
         self,
@@ -198,3 +205,12 @@ class AuthService:
         if str(subject).isdigit():
             return db.query(User).filter(User.id == int(subject)).first()
         return db.query(User).filter(User.username == str(subject)).first()
+
+    def issue_temporary_password_by_email(self, db: Session, email: str) -> str:
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            raise ValueError("해당 이메일로 등록된 계정을 찾을 수 없습니다.")
+        temp_password = self._generate_temporary_password()
+        user.hashed_password = self.get_password_hash(temp_password)
+        db.commit()
+        return temp_password

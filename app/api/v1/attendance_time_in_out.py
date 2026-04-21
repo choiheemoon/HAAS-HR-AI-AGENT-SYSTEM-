@@ -2,7 +2,7 @@
 from datetime import date
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
@@ -109,3 +109,24 @@ def delete_time_in_out(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return {"ok": True, "id_time_in_out": record_id}
+
+
+@router.post("/time-in-out/upload-dat", response_model=Dict[str, Any])
+async def upload_time_in_out_dat(
+    dat_file: UploadFile = File(...),
+    company_id: Optional[int] = Query(None, ge=1),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        raw = await dat_file.read()
+        return AttendanceTimeInOutService(db).bulk_import_dat_file(
+            user=current_user,
+            filename=dat_file.filename or "attendance.dat",
+            file_bytes=raw,
+            company_id=company_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+

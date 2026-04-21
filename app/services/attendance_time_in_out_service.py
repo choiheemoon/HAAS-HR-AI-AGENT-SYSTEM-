@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import func, or_, tuple_
 from sqlalchemy.orm import Session, selectinload
@@ -76,9 +76,22 @@ def _id_sin_out(v: Any, default: int = 2) -> int:
     - 수기 등록: 2 (기본)
     """
     n = _int(v)
-    if n in (1, 2):
+    if n in (1, 2, 3):
         return int(n)
     return default
+
+
+def _parse_dat_punch_datetime(date_raw: str, time_raw: str) -> Optional[datetime]:
+    d = (date_raw or "").strip()
+    t = (time_raw or "").strip()
+    if not d or not t:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y%m%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y%m%d %H:%M"):
+        try:
+            return datetime.strptime(f"{d} {t}", fmt)
+        except Exception:
+            continue
+    return None
 
 
 def _punch_local_date(r: AttendanceTimeInOut) -> Optional[date]:
@@ -470,3 +483,141 @@ class AttendanceTimeInOutService:
         r.user_change = _str(getattr(user, "username", None) or str(user.id), 100)
         r.updated_at = datetime.utcnow()
         self.db.commit()
+
+    def bulk_import_dat_file(
+        self,
+        *,
+        user: User,
+        filename: str,
+        file_bytes: bytes,
+        company_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        allowed = self._allowed_company_ids(user)
+        if not allowed:
+            raise ValueError("접근 가능한 회사가 없습니다.")
+        if company_id is not None and company_id not in allowed:
+            raise ValueError("회사를 찾을 수 없습니다.")
+
+        text: Optional[str] = None
+        for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr", "latin-1"):
+            try:
+                text = file_bytes.decode(enc)
+                break
+            except Exception:
+                continue
+        if text is None:
+            raise ValueError("파일 인코딩을 해석할 수 없습니다.")
+
+        emq = self.db.query(Employee).filter(or_(Employee.company_id.is_(None), Employee.company_id.in_(allowed)))
+        if company_id is not None:
+            emq = emq.filter(Employee.company_id == int(company_id))
+        employees = emq.all()
+        card_to_emp: Dict[str, Employee] = {}
+        for e in employees:
+            card = str(getattr(e, "swipe_card", "") or "").strip()
+            if not card:
+                continue
+            card_to_emp[card] = e
+
+        parsed: List[Tuple[str, datetime]] = []
+        malformed = 0
+        for ln in text.splitlines():
+            row = (ln or "").strip()
+            if not row:
+                continue
+            parts = row.split()
+            if len(parts) < 3:
+                malformed += 1
+                continue
+            card_no = parts[0].strip()
+            if not card_no:
+                malformed += 1
+                continue
+            punch_dt = _parse_dat_punch_datetime(parts[1], parts[2])
+            if punch_dt is None:
+                malformed += 1
+                continue
+            parsed.append((card_no, punch_dt))
+
+        if not parsed:
+            return {
+                "ok": True,
+                "filename": filename,
+                "parsed_rows": 0,
+                "inserted": 0,
+                "skipped_unknown_card": 0,
+                "skipped_duplicate": 0,
+                "malformed_rows": malformed,
+                "unknown_cards_sample": [],
+            }
+
+        # dedupe keys from DB first to avoid duplicate punches on repeated upload
+        emp_ids = sorted({int(e.id) for _, e in card_to_emp.items() if e.id})
+        dt_min = min(dt for _, dt in parsed)
+        dt_max = max(dt for _, dt in parsed)
+        existing_keys: Set[Tuple[int, datetime]] = set()
+        if emp_ids:
+            ex_rows = (
+                self.db.query(AttendanceTimeInOut.employee_id, AttendanceTimeInOut.date_in_out)
+                .filter(
+                    AttendanceTimeInOut.status_del.is_(False),
+                    AttendanceTimeInOut.employee_id.in_(emp_ids),
+                    AttendanceTimeInOut.date_in_out >= dt_min,
+                    AttendanceTimeInOut.date_in_out <= dt_max,
+                )
+                .all()
+            )
+            for eid, pdt in ex_rows:
+                if eid and pdt:
+                    existing_keys.add((int(eid), pdt.replace(microsecond=0)))
+
+        now = datetime.utcnow()
+        inserted = 0
+        skipped_unknown = 0
+        skipped_dup = 0
+        unknown_cards: Dict[str, int] = defaultdict(int)
+        for card_no, pdt in parsed:
+            emp = card_to_emp.get(card_no)
+            if not emp or not emp.id:
+                skipped_unknown += 1
+                unknown_cards[card_no] += 1
+                continue
+            key = (int(emp.id), pdt.replace(microsecond=0))
+            if key in existing_keys:
+                skipped_dup += 1
+                continue
+            row = AttendanceTimeInOut(
+                company_id=emp.company_id,
+                employee_id=int(emp.id),
+                id_card=card_no[:20],
+                date_i=datetime(pdt.year, pdt.month, pdt.day, 0, 0, 0),
+                date_in_out=pdt.replace(microsecond=0),
+                id_sin_out=3,  # 일괄 등록
+                user_change=_str(getattr(user, "username", None) or str(user.id), 100),
+                machine_no="파일",
+                location=None,
+                add_memo="일괄 업로드(DAT)",
+                status_del=False,
+                id_time_in_out_approve=None,
+                sync_status=None,
+                memo_=None,
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(row)
+            existing_keys.add(key)
+            inserted += 1
+
+        self.db.commit()
+        top_unknown = sorted(unknown_cards.items(), key=lambda x: (-x[1], x[0]))[:20]
+        return {
+            "ok": True,
+            "filename": filename,
+            "parsed_rows": len(parsed),
+            "inserted": inserted,
+            "skipped_unknown_card": skipped_unknown,
+            "skipped_duplicate": skipped_dup,
+            "malformed_rows": malformed,
+            "unknown_cards_sample": [{"card_no": c, "count": n} for c, n in top_unknown],
+        }
+

@@ -19,6 +19,7 @@ type Row = {
   company_id?: number | null;
   employee_id?: number | null;
   employee_number?: string | null;
+  id_card?: string | null;
   employee_name?: string | null;
   employee_department?: string | null;
   employee_status?: string | null;
@@ -191,6 +192,7 @@ export default function AttendanceOverviewPage() {
         getValue: (r: Row) => String(r.shift_work_code || '-').trim() || '-',
       },
       { key: 'employee_number', label: t('attendanceOverview.col.employeeNo'), getValue: (r: Row) => String(r.employee_number || '-') },
+      { key: 'id_card', label: t('employees.general.swipeCard'), getValue: (r: Row) => String(r.id_card || '-') },
       { key: 'employee_name', label: t('attendanceOverview.col.employeeName'), getValue: (r: Row) => String(r.employee_name || '-') },
       {
         key: 'employee_department',
@@ -210,7 +212,12 @@ export default function AttendanceOverviewPage() {
       {
         key: 'register_type',
         label: t('attendanceOverview.col.registerType'),
-        getValue: (r: Row) => (r.id_sin_out === 1 ? t('attendanceOverview.auto') : t('attendanceOverview.manual')),
+        getValue: (r: Row) =>
+          r.id_sin_out === 1
+            ? t('attendanceOverview.auto')
+            : r.id_sin_out === 3
+            ? t('attendanceOverview.bulk')
+            : t('attendanceOverview.manual'),
       },
       { key: 'machine_no', label: t('attendanceOverview.col.machine'), getValue: (r: Row) => String(r.machine_no || '-') },
       { key: 'location', label: t('attendanceOverview.col.location'), getValue: (r: Row) => String(r.location || '-') },
@@ -269,6 +276,7 @@ export default function AttendanceOverviewPage() {
         { header: t('attendanceStandard.tab.shiftGroup'), key: 'shift_group_name', width: 14 },
         { header: t('attendanceStandard.tab.shift'), key: 'shift_work_code', width: 12 },
         { header: t('attendanceOverview.col.employeeNo'), key: 'employee_number', width: 16 },
+        { header: t('employees.general.swipeCard'), key: 'id_card', width: 16 },
         { header: t('attendanceOverview.col.employeeName'), key: 'employee_name', width: 18 },
         { header: t('attendanceOverview.col.department'), key: 'employee_department', width: 18 },
         { header: t('attendanceOverview.col.registerType'), key: 'register_type', width: 14 },
@@ -287,7 +295,13 @@ export default function AttendanceOverviewPage() {
           employee_number: r.employee_number || '-',
           employee_name: r.employee_name || '-',
           employee_department: r.employee_department || '-',
-          register_type: r.id_sin_out === 1 ? t('attendanceOverview.auto') : t('attendanceOverview.manual'),
+          register_type:
+            r.id_sin_out === 1
+              ? t('attendanceOverview.auto')
+              : r.id_sin_out === 3
+              ? t('attendanceOverview.bulk')
+              : t('attendanceOverview.manual'),
+          id_card: r.id_card || '-',
           machine_no: r.machine_no || '-',
           location: r.location || '-',
           add_memo: r.add_memo || '-',

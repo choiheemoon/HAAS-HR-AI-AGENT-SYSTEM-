@@ -258,6 +258,10 @@ export default function AttendanceInquiryPage() {
   const [selectedDayIndex, setSelectedDayIndex] = useState(-1);
   const [mode, setMode] = useState<MasterUiMode>('browse');
   const [saving, setSaving] = useState(false);
+  const [uploadingDat, setUploadingDat] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadDoneMsg, setUploadDoneMsg] = useState('');
+  const datUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [editBuffer, setEditBuffer] = useState<DayGridRow[] | null>(null);
   const initialAtEditRef = useRef<DayGridRow[] | null>(null);
 
@@ -403,6 +407,7 @@ export default function AttendanceInquiryPage() {
       return (
         (emp.name || '').toLowerCase().includes(q) ||
         (emp.employee_number || '').toLowerCase().includes(q) ||
+        (emp.swipe_card || '').toLowerCase().includes(q) ||
         (emp.department || '').toLowerCase().includes(q) ||
         deptLabel.includes(q) ||
         (emp.position || '').toLowerCase().includes(q) ||
@@ -779,6 +784,47 @@ export default function AttendanceInquiryPage() {
     }
   };
 
+  const selectedCompanyId = useMemo(() => {
+    const fromFilter = companyFilter ? Number(companyFilter) : NaN;
+    if (Number.isFinite(fromFilter) && fromFilter > 0) return Number(fromFilter);
+    const fromEmp = Number(selectedEmp?.company_id ?? 0);
+    return Number.isFinite(fromEmp) && fromEmp > 0 ? fromEmp : undefined;
+  }, [companyFilter, selectedEmp?.company_id]);
+
+  const onUploadDatFile = async (file: File) => {
+    if (!file) return;
+    setUploadDoneMsg('');
+    setUploadingDat(true);
+    setUploadProgress(0);
+    try {
+      const { data } = await apiClient.uploadAttendanceTimeInOutDat(
+        file,
+        {
+          company_id: selectedCompanyId,
+        },
+        (pct) => setUploadProgress(pct)
+      );
+      const r = (data || {}) as Record<string, unknown>;
+      const msg = [
+        `파싱: ${Number(r.parsed_rows ?? 0)}건`,
+        `등록: ${Number(r.inserted ?? 0)}건`,
+        `중복 제외: ${Number(r.skipped_duplicate ?? 0)}건`,
+        `카드 미매핑: ${Number(r.skipped_unknown_card ?? 0)}건`,
+        `형식오류: ${Number(r.malformed_rows ?? 0)}건`,
+      ].join('\n');
+      alert(msg);
+      setUploadProgress(100);
+      setUploadDoneMsg('완료되었습니다.');
+      await loadRows();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      alert(typeof msg === 'string' ? msg : 'DAT 업로드 중 오류가 발생했습니다.');
+    } finally {
+      setUploadingDat(false);
+      if (datUploadInputRef.current) datUploadInputRef.current.value = '';
+    }
+  };
+
   const goFirstRecord = () => {
     if (displayGrid.length === 0) return;
     setSelectedDayIndex(0);
@@ -1017,6 +1063,25 @@ export default function AttendanceInquiryPage() {
                 {t('employees.personnelRecord.saving', '저장 중...')}
               </div>
             )}
+            {uploadingDat && (
+              <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                <div className="flex items-center justify-between gap-2">
+                  <span>근태업로드 진행중...</span>
+                  <span className="font-semibold tabular-nums">{uploadProgress}%</span>
+                </div>
+                <div className="mt-1 h-1.5 w-full rounded bg-indigo-100">
+                  <div
+                    className="h-1.5 rounded bg-indigo-500 transition-all"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {!uploadingDat && uploadDoneMsg ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                {uploadDoneMsg}
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap gap-3 items-end border border-gray-200 rounded-md bg-white/90 p-2">
               <div className="min-w-[200px] flex-1">
@@ -1056,6 +1121,24 @@ export default function AttendanceInquiryPage() {
               >
                 {t('attendanceInquiry.reload')}
               </button>
+              <button
+                type="button"
+                className="text-xs px-3 py-2 border border-indigo-300 rounded-lg bg-indigo-50 text-indigo-900 font-medium hover:bg-indigo-100 disabled:opacity-60"
+                disabled={rowsLoading || editing || uploadingDat}
+                onClick={() => datUploadInputRef.current?.click()}
+              >
+                {uploadingDat ? t('common.loading') : '근태업로드'}
+              </button>
+              <input
+                ref={datUploadInputRef}
+                type="file"
+                accept=".dat,.txt"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void onUploadDatFile(f);
+                }}
+              />
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs border border-dashed rounded-md px-3 py-2 bg-gray-50">

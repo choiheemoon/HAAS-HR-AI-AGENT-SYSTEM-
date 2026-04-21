@@ -243,6 +243,28 @@ END $$;
     )
     _run_ddl(
         engine,
+        """
+DO $$
+DECLARE v_is_unique boolean;
+BEGIN
+  SELECT i.indisunique INTO v_is_unique
+  FROM pg_class c
+  JOIN pg_index i ON i.indexrelid = c.oid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE c.relname = 'ix_companies_company_code'
+    AND n.nspname = 'public'
+  LIMIT 1;
+
+  IF COALESCE(v_is_unique, false) THEN
+    EXECUTE 'DROP INDEX IF EXISTS public.ix_companies_company_code';
+    EXECUTE 'CREATE INDEX IF NOT EXISTS ix_companies_company_code ON public.companies(company_code)';
+  END IF;
+END $$;
+""",
+        "companies_fix_unique_ix_company_code",
+    )
+    _run_ddl(
+        engine,
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_companies_group_company_code ON companies(system_group_code, company_code)",
         "uq_companies_group_company_code",
     )

@@ -18,6 +18,7 @@ from app.config import settings
 from app.schemas.system_rbac import MenuPermissionRow
 from app.models.company import Company
 from app.schemas.company import CompanyResponse
+from app.services.onboarding_setup_service import OnboardingSetupService
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -362,6 +363,22 @@ class PasswordChangeRequest(BaseModel):
     new_password: str
 
 
+class OnboardingSetupRequest(BaseModel):
+    major_minor_codes: bool = True
+    hr_reference: bool = True
+    attendance_reference: bool = True
+    system_rbac: bool = True
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    temporary_password: str
+
+
 @router.put("/me/password", response_model=UserResponse)
 def change_password(
     password_data: PasswordChangeRequest,
@@ -392,3 +409,52 @@ def change_password(
     db.refresh(current_user)
     
     return current_user
+
+
+@router.post("/onboarding/setup")
+def run_onboarding_setup(
+    body: OnboardingSetupRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """회원가입 직후 환경설정 체크 항목 기준 일괄 생성."""
+    service = OnboardingSetupService(db)
+    try:
+        return service.run_setup(
+            current_user,
+            {
+                "major_minor_codes": bool(body.major_minor_codes),
+                "hr_reference": bool(body.hr_reference),
+                "attendance_reference": bool(body.attendance_reference),
+                "system_rbac": bool(body.system_rbac),
+            },
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"환경설정 일괄생성 중 오류가 발생했습니다: {str(e)}"
+        ) from e
+
+
+@router.post("/forgot-password/temp", response_model=ForgotPasswordResponse)
+def issue_temporary_password(
+    body: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    auth_service = AuthService()
+    try:
+        temp_password = auth_service.issue_temporary_password_by_email(db, body.email)
+        return ForgotPasswordResponse(
+            message="임시비밀번호가 발급되었습니다. 로그인 후 반드시 비밀번호를 변경해주세요.",
+            temporary_password=temp_password,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"임시비밀번호 발급 중 오류가 발생했습니다: {str(e)}"
+        ) from e

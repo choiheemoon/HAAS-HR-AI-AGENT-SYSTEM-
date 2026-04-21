@@ -3,10 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.api.deps import require_system_admin
 from app.services.system_rbac_service import SystemRbacService
+from app.services.onboarding_setup_service import OnboardingSetupService
 from app.models.user import User
 from app.schemas.system_rbac import (
     PermissionGroupCreate,
@@ -22,6 +24,16 @@ from app.schemas.system_rbac import (
 )
 
 router = APIRouter(dependencies=[Depends(require_system_admin)])
+
+
+class TemplateGenerationRequest(BaseModel):
+    source_company_id: int
+    target_company_id: int | None = None
+    create_new_company: bool = False
+    major_minor_codes: bool = True
+    hr_reference: bool = True
+    attendance_reference: bool = True
+    system_rbac: bool = True
 
 
 def _svc(db: Session) -> SystemRbacService:
@@ -204,3 +216,32 @@ def put_user_company_access(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True}
+
+
+@router.post("/template-generation")
+def run_template_generation(
+    body: TemplateGenerationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    try:
+        return OnboardingSetupService(db).run_template_generation(
+            current_user,
+            source_company_id=int(body.source_company_id),
+            target_company_id=int(body.target_company_id) if body.target_company_id else None,
+            create_new_company=bool(body.create_new_company),
+            options={
+                "major_minor_codes": bool(body.major_minor_codes),
+                "hr_reference": bool(body.hr_reference),
+                "attendance_reference": bool(body.attendance_reference),
+                "system_rbac": bool(body.system_rbac),
+            },
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"템플릿 생성(기준정보) 중 오류가 발생했습니다: {str(e)}"
+        ) from e

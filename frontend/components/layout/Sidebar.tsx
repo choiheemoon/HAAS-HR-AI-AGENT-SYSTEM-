@@ -79,6 +79,7 @@ const systemSubMenus = [
   { labelKey: 'menu.systemUserCompanies', tab: 'system-user-companies', icon: Link2 },
   { labelKey: 'menu.systemRoleGroups', tab: 'system-role-groups', icon: Shield },
   { labelKey: 'menu.systemRoleGroupMenus', tab: 'system-role-group-menus', icon: Share2 },
+  { labelKey: 'menu.systemTemplateGeneration', tab: 'system-template-generation', icon: Database },
 ];
 
 const attendanceSubMenus = [
