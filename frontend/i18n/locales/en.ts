@@ -580,7 +580,7 @@ const en: TranslationDict = {
   'attendanceMaster.ot.notChargeSend': 'Do not charge OT to payroll',
   'attendanceMaster.ot.payEachHour': 'OT pay each hour (OT6)',
   'attendanceMaster.ot.changAll': 'Change all OT6',
-  'attendanceMaster.ot.autoHoliday': 'Auto OT (incl. holidays)',
+  'attendanceMaster.ot.autoHoliday': 'Auto OT generation',
   'attendanceMaster.ot.excludeHoliday': 'Exclude holidays',
   'attendanceMaster.ot.ot6Baht': 'OT6 hourly (Baht)',
   'attendanceMaster.ot.lunchBaht': 'Lunch by employee (Baht)',

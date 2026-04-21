@@ -124,7 +124,7 @@ def main() -> None:
             "continue_shift_without_zip_minutes": 0,
             **common_rule,
             "ot_ranges": [
-                {"range_start": "20:00", "range_end": "05:00", "monthly_rate_a": 1.0, "monthly_rate_b": 1.0, "monthly_rate_holiday": None, "daily_rate_a": 2.0, "daily_rate_b": 1.0, "daily_rate_holiday": None},
+                {"range_start": "20:00", "range_end": "05:00", "monthly_rate_a": 0, "monthly_rate_b": 1.0, "monthly_rate_holiday": 1.0, "daily_rate_a": 0, "daily_rate_b": 2.0, "daily_rate_holiday": 1.0},
                 {"range_start": "05:01", "range_end": "05:30", "monthly_rate_a": None, "monthly_rate_b": None, "monthly_rate_holiday": None, "daily_rate_a": None, "daily_rate_b": None, "daily_rate_holiday": None},
                 {"range_start": "05:31", "range_end": "12:00", "monthly_rate_a": 1.5, "monthly_rate_b": 3.0, "monthly_rate_holiday": 3.0, "daily_rate_a": 1.5, "daily_rate_b": 3.0, "daily_rate_holiday": 3.0},
                 {"range_start": "12:01", "range_end": "20:00", "monthly_rate_a": 1.5, "monthly_rate_b": 3.0, "monthly_rate_holiday": 3.0, "daily_rate_a": 1.5, "daily_rate_b": 3.0, "daily_rate_holiday": 3.0},

@@ -2,6 +2,7 @@
 
 `attendance_payment_period`의 일자(시급/월급·OT) 범위로 `attendance_time_day`를 합산한다.
 Regular OT asking(`attendance_additional_ot`)는 근태/OT/수당관리 조회와 동일 규칙으로 oth1·oth2에 가산한다.
+(자동OT생성이 켜진 직원만 가산. 휴일제외가 함께 켜진 경우 `day_off` 일자는 추가 OT 가산 제외.)
 OT 분(oth1~6)·OT금액(othb)·현지 OT급여(overtime_pay_local)는 일자별로 평일/휴일로 나누어 합산한다
 (법정휴일·일요·근무달력 휴무 `day_off`는 휴일 구간, 그 외는 평일).
 """
@@ -24,6 +25,10 @@ from app.models.employee_reference_item import EmployeeReferenceItem
 from app.models.employee_type import EmployeeType
 from app.models.user import User
 from app.services.attendance_additional_ot_service import compute_total_minutes
+from app.services.attendance_time_day_service import (
+    _employee_ids_auto_ot_exclude_calendar_holidays,
+    _employee_ids_auto_ot_generation_enabled,
+)
 from app.services.company_service import CompanyService
 from app.services.master_data.master_data_service import MasterDataService
 
@@ -598,6 +603,8 @@ class AttendancePayrollBucketService:
         if union_from is None or union_to is None:
             raise ValueError("급여근태기간에 유효한 시작·종료일이 없습니다.")
         add_map = self._load_additional_ot_map(emp_ids, union_from, union_to, allowed)
+        auto_ot_eids = _employee_ids_auto_ot_generation_enabled(self.db, emp_ids)
+        exclude_cal_ot_eids = _employee_ids_auto_ot_exclude_calendar_holidays(self.db, emp_ids)
         holiday_keys = _company_holiday_key_set(self.db, company_id, union_from, union_to)
 
         rows_out: List[Dict[str, Any]] = []
@@ -629,6 +636,10 @@ class AttendancePayrollBucketService:
                 wd = dr.work_day
                 eid = int(dr.employee_id)
                 add_sub = add_map.get((eid, wd), {}) if wd else {}
+                if eid not in auto_ot_eids:
+                    add_sub = {}
+                elif eid in exclude_cal_ot_eids and bool(getattr(dr, "day_off", False)):
+                    add_sub = {}
                 is_hol_ot = bool(wd) and _is_holiday_ot_day(company_id, wd, dr, holiday_keys)
 
                 if dr.day_off:

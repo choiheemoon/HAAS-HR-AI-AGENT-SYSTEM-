@@ -638,7 +638,7 @@ const th: TranslationDict = {
   'attendanceMaster.ot.notChargeSend': 'ไม่ส่ง OT เงินเดือน',
   'attendanceMaster.ot.payEachHour': 'จ่าย OT รายชั่วโมง (OT6)',
   'attendanceMaster.ot.changAll': 'เปลี่ยน OT6 ทั้งหมด',
-  'attendanceMaster.ot.autoHoliday': 'สร้าง OT อัตโนมัติ (รวมวันหยุด)',
+  'attendanceMaster.ot.autoHoliday': 'สร้าง OT อัตโนมัติ',
   'attendanceMaster.ot.excludeHoliday': 'ยกเว้นวันหยุด',
   'attendanceMaster.ot.ot6Baht': 'OT6 ต่อชม. (บาท)',
   'attendanceMaster.ot.lunchBaht': 'กลางวันตามพนักงาน (บาท)',

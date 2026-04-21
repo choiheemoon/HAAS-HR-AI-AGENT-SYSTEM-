@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Load, Session, aliased
@@ -13,6 +13,7 @@ from app.models.attendance_additional_ot import AttendanceAdditionalOt
 from app.models.attendance_time_day import AttendanceTimeDay
 from app.models.company import Company
 from app.models.employee import Employee
+from app.models.employee_attendance_master import EmployeeAttendanceMaster, EmployeeAttendanceMasterOt
 from app.models.employee_reference_item import EmployeeReferenceItem
 from app.models.user import User
 from app.services.attendance_additional_ot_service import compute_total_minutes
@@ -134,6 +135,41 @@ def _additional_ot_approve_included(approve_status: Optional[str]) -> bool:
     return s in ("approved", "approve", "승인", "승인완료", "completed", "complete")
 
 
+def _employee_ids_auto_ot_generation_enabled(db: Session, employee_ids: List[int]) -> Set[int]:
+    """근태마스터 OT: 자동OT생성(`auto_ot_on_holiday`)이 켜진 직원."""
+    if not employee_ids:
+        return set()
+    rows = (
+        db.query(EmployeeAttendanceMaster.employee_id)
+        .join(
+            EmployeeAttendanceMasterOt,
+            EmployeeAttendanceMasterOt.master_id == EmployeeAttendanceMaster.id,
+        )
+        .filter(EmployeeAttendanceMaster.employee_id.in_(employee_ids))
+        .filter(EmployeeAttendanceMasterOt.auto_ot_on_holiday.is_(True))
+        .all()
+    )
+    return {int(r[0]) for r in rows if r[0] is not None}
+
+
+def _employee_ids_auto_ot_exclude_calendar_holidays(db: Session, employee_ids: List[int]) -> Set[int]:
+    """자동OT생성 + 휴일제외 동시 적용 직원(근무달력 휴무일 OT 가산 제외)."""
+    if not employee_ids:
+        return set()
+    rows = (
+        db.query(EmployeeAttendanceMaster.employee_id)
+        .join(
+            EmployeeAttendanceMasterOt,
+            EmployeeAttendanceMasterOt.master_id == EmployeeAttendanceMaster.id,
+        )
+        .filter(EmployeeAttendanceMaster.employee_id.in_(employee_ids))
+        .filter(EmployeeAttendanceMasterOt.auto_ot_on_holiday.is_(True))
+        .filter(EmployeeAttendanceMasterOt.auto_ot_exclude_holidays.is_(True))
+        .all()
+    )
+    return {int(r[0]) for r in rows if r[0] is not None}
+
+
 def _additional_ot_bucket_key(ot_type: Optional[str]) -> str:
     """Regular OT asking `ot_type` → 표시용 oth1..oth6 칸(분 단위 합산).
 
@@ -235,9 +271,11 @@ class AttendanceTimeDayService:
         date_from: Optional[date],
         date_to: Optional[date],
     ) -> None:
-        """근태/OT/수당관리 조회용: `attendance_additional_ot`(Regular OT asking) 분을 oth1~oth6에 가산.
+        """레거시: 추가 OT(Regular asking)를 조회 응답에 덧씌우던 로직.
 
-        DB `attendance_time_day` 값은 변경하지 않고 응답만 보정한다.
+        일괄 집계(`AttendanceAggregateService`)가 이미 `attendance_additional_ot`를 oth·agg_additional_*에
+        반영하므로, 목록 조회에서 다시 가산하면 oth1 등이 중복·왜곡될 수 있다.
+        현재 `list_for_employee` / `list_all_for_period`에서는 호출하지 않는다.
         """
         if not items:
             return
@@ -247,6 +285,16 @@ class AttendanceTimeDayService:
         eids = sorted({int(x["employee_id"]) for x in items if x.get("employee_id") is not None})
         if not eids:
             return
+
+        auto_ot_eids = _employee_ids_auto_ot_generation_enabled(self.db, eids)
+        exclude_cal_holiday_eids = _employee_ids_auto_ot_exclude_calendar_holidays(self.db, eids)
+        day_off_by_emp_day: Dict[Tuple[int, date], bool] = {}
+        for x in items:
+            eid0 = x.get("employee_id")
+            wd0 = _pd(x.get("work_day"))
+            if eid0 is None or wd0 is None:
+                continue
+            day_off_by_emp_day[(int(eid0), wd0)] = bool(x.get("day_off"))
 
         df, dt = date_from, date_to
         if df is None or dt is None:
@@ -287,6 +335,10 @@ class AttendanceTimeDayService:
             if mins <= 0:
                 continue
             eid = int(r.employee_id)
+            if eid not in auto_ot_eids:
+                continue
+            if eid in exclude_cal_holiday_eids and day_off_by_emp_day.get((eid, wd), False):
+                continue
             bk = _additional_ot_bucket_key(getattr(r, "ot_type", None))
             key = (eid, wd)
             deltas[key][bk] += mins
@@ -345,9 +397,7 @@ class AttendanceTimeDayService:
         if date_to:
             q = q.filter(AttendanceTimeDay.work_day <= date_to)
         rows = q.order_by(AttendanceTimeDay.work_day.asc(), AttendanceTimeDay.row_no.asc()).all()
-        items = [_row_to_dict(r) for r in rows]
-        self._merge_regular_ot_asking_into_items(user, items, date_from, date_to)
-        return items
+        return [_row_to_dict(r) for r in rows]
 
     def list_all_for_period(
         self,
@@ -494,7 +544,6 @@ class AttendanceTimeDayService:
             item["employee_status"] = e.status or "active"
             item["company_id"] = e.company_id
             out.append(item)
-        self._merge_regular_ot_asking_into_items(user, out, date_from, date_to)
         return {"items": out, "total": total, "page": safe_page, "page_size": safe_page_size}
 
     def _scope_time_day_rows_for_report(

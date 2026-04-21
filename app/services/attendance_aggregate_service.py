@@ -128,6 +128,7 @@ def _iter_ot_range_bounds(
     근태기준 UI에서 17:31~00:00 다음 05:31~12:00은 '익일 05:31~12:00' 의미인데,
     모든 시작/종료를 근무일(cur)만으로 `_combine_local(cur, …)` 하면 05:31이 당일로 잡혀
     익일 08:08 퇴근 타각이 OT 마감 밖으로 빠지는 문제가 생긴다.
+
     """
     if not shift_def:
         return []
@@ -166,6 +167,21 @@ def _shift_earliest_checkin(anchor: date, shift_def: Optional[AttendanceShift]) 
     if not raw:
         return None
     return _combine_local(anchor, raw, next_day=False)
+
+
+def _is_cross_midnight_shift(shift_def: Optional[AttendanceShift]) -> bool:
+    """근무시작~퇴근 핵심창이 자정을 넘기는 야간 교대인지."""
+    if not shift_def:
+        return False
+    sw_raw = (shift_def.start_work or shift_def.start_check_in or "").strip()
+    eo_raw = (shift_def.time_out or "").strip()
+    sw_hm = _parse_hhmm(sw_raw)
+    eo_hm = _parse_hhmm(eo_raw)
+    if not sw_hm or not eo_hm:
+        return False
+    sw_min = sw_hm[0] * 60 + sw_hm[1]
+    eo_min = eo_hm[0] * 60 + eo_hm[1]
+    return eo_min <= sw_min
 
 
 def _resolve_workday_shift(
@@ -232,7 +248,10 @@ def _time_out_cross_midnight(
     deadline: Optional[datetime],
     shift_def_on: Callable[[date], Optional[AttendanceShift]],
 ) -> Optional[datetime]:
-    """교대 OT 구간 종료 시각까지 타각을 보고, 각 달력일의 '체크인 시작' 이전 카드만 전일 퇴근으로 귀속."""
+    """교대 OT 구간 종료(deadline)까지 타각을 보고, 익일(근무일+1달력일)의 '체크인 시작' 이전 카드만 전일 퇴근으로 귀속.
+
+    OT deadline이 멀리까지 잡혀 있어도 모레 이후 달력일로 퇴근 후보를 밀지 않는다.
+    """
     if not punches_same_day:
         return None
     time_in = punches_same_day[0]
@@ -243,19 +262,33 @@ def _time_out_cross_midnight(
     for p in punches_same_day:
         if p >= time_in and p <= deadline:
             last_assigned = p
-    end_scan = deadline.date()
-    scan = work_day + timedelta(days=1)
-    max_scan = work_day + timedelta(days=14)
-    while scan <= end_scan and scan <= max_scan:
-        gate = _shift_earliest_checkin(scan, shift_def_on(scan))
-        for p in sorted(punch_by_emp_day.get((emp_id, scan), [])):
-            if p > deadline:
-                return last_assigned
-            if gate is not None and p >= gate:
-                return last_assigned
-            last_assigned = p
-        scan += timedelta(days=1)
+    next_cal_day = work_day + timedelta(days=1)
+    gate = _shift_earliest_checkin(next_cal_day, shift_def_on(next_cal_day))
+    for p in sorted(punch_by_emp_day.get((emp_id, next_cal_day), [])):
+        if p > deadline:
+            return last_assigned
+        if gate is not None and p >= gate:
+            return last_assigned
+        last_assigned = p
     return last_assigned
+
+
+def _fallback_time_out_from_following_days(
+    work_day: date,
+    emp_id: int,
+    time_in: datetime,
+    punch_by_emp_day: DefaultDict[Tuple[int, date], List[datetime]],
+    max_days: int = 1,
+) -> Optional[datetime]:
+    """당일 카드만 있고 퇴근이 익일인 야간 근무: 익일(근무일+1일) 범위의 첫 타각만 퇴근 후보로 사용."""
+    ti = time_in.replace(microsecond=0)
+    for ddelta in range(1, max_days + 1):
+        nx = work_day + timedelta(days=ddelta)
+        for p in sorted(punch_by_emp_day.get((emp_id, nx), [])):
+            pt = p.replace(microsecond=0)
+            if pt > ti:
+                return pt
+    return None
 
 
 def _daily_work_minutes(settings: Optional[AttendanceCompanySettings]) -> int:
@@ -309,6 +342,11 @@ def _round_ot_daily_minutes(raw: int, sec: Optional[AttendanceRoundUpSection]) -
     OT 반올림 구간이 0~59분 기반으로 저장된 회사는
     총 OT분 전체가 아니라 "시간 나머지 분"에 반올림을 적용한다.
     예) 99분(1:39), 39분→30분 이면 최종 90분(1:30).
+
+    나머지 분 표가 46~59분 등을 "60분(다음 정각)"으로 올리면,
+    실근무 2:48(168분)이 3:00(180분)처럼 **타각·OT표로 합산한 분(raw)을 넘는** 결과가 나올 수 있다.
+    이 경우 표 적용 후 **raw 이하로 상한**을 걸고, 30분 이상 구간은 **30분 단위 내림**해
+    02:48 → 02:30 과 같이 과다 집계를 막는다. 30분 미만은 그대로 둔다(소액 OT 소멸 방지).
     """
     if raw <= 0 or not sec or not sec.tiers:
         return raw
@@ -323,7 +361,12 @@ def _round_ot_daily_minutes(raw: int, sec: Optional[AttendanceRoundUpSection]) -
     base_hour = raw // 60
     minute_part = raw % 60
     rounded_minute = _round_with_section(minute_part, sec)
-    return base_hour * 60 + rounded_minute
+    sub = base_hour * 60 + rounded_minute
+    if sub > raw:
+        sub = raw
+    if sub >= 30:
+        sub = (sub // 30) * 30
+    return sub
 
 
 def _leave_approved(st: Optional[str]) -> bool:
@@ -338,18 +381,20 @@ def _leave_unpaid(leave: Leave) -> bool:
     return "unpaid" in t or "무급" in t or "without" in t
 
 
-def _oth_index_from_rate(rate: Decimal) -> int:
-    """OT 배수 → oth1..oth6 인덱스 0..5."""
+def _oth_index_from_rate(rate: Decimal) -> Optional[int]:
+    """OT 배수 → oth1..oth6 인덱스 0..5. 표에 없는 배수는 None(해당 분 집계 생략)."""
     try:
         x = float(rate)
     except Exception:
-        return 0
+        return None
+    if x <= 0 or math.isnan(x):
+        return None
     for i, t in enumerate([1.0, 1.5, 2.0, 2.5, 3.0]):
         if math.isclose(x, t, rel_tol=0.02, abs_tol=0.02):
             return i
     if x > 3.0:
         return 5
-    return 0
+    return None
 
 
 def _day_band(
@@ -400,7 +445,7 @@ def _ot_rate_for_range(
         d = Decimal(str(v))
     except Exception:
         return None
-    if d == 0:
+    if d <= 0:
         return None
     return d
 
@@ -434,15 +479,26 @@ def _minutes_to_buckets_for_interval(
     monthly_pay: bool,
     band: str,
 ) -> List[int]:
+    """구간 [start_dt, end_dt)를 교대 OT 표(시간대·배수)와 교집합만 버킷에 넣는다.
+
+    - OT 표 행이 없거나(`None`·빈 목록) 비어 있으면 타각 OT 분은 **0**(임의로 oth1에 넣지 않음).
+      Python에서 `not []`가 참이라 예전에는 빈 표인 야간 교대가 전 구간 oth1로 쌓이는 문제가 있었다.
+    - 행이 있으면 **배수가 정의된(0·빈칸이 아닌) 교집합 분만** 해당 버킷에 합산한다.
+      평일 0배·빈 칸 구간은 집계하지 않으며 잔여를 oth1로 흘리지 않는다.
+    """
     out = [0, 0, 0, 0, 0, 0]
     lo = start_dt.replace(microsecond=0)
     hi = end_dt.replace(microsecond=0)
     if hi <= lo:
         return out
-    if not shift_def or not getattr(shift_def, "ot_ranges", None):
-        out[0] = int((hi - lo).total_seconds() // 60)
+    if not shift_def:
         return out
-    matched = 0
+    try:
+        _ot_rows = list(getattr(shift_def, "ot_ranges", ()) or ())
+    except TypeError:
+        _ot_rows = []
+    if len(_ot_rows) == 0:
+        return out
     for rng, rs, re in _iter_ot_range_bounds(day, shift_def):
         seg_lo = max(lo, rs.replace(microsecond=0))
         seg_hi = min(hi, re.replace(microsecond=0))
@@ -451,16 +507,133 @@ def _minutes_to_buckets_for_interval(
         mins = int((seg_hi - seg_lo).total_seconds() // 60)
         if mins <= 0:
             continue
+        # 핵심 근무창(start_work~time_out)과 동일한 OT 표 행에서는 휴식합계(break_sum)를 차감한다.
+        # 일요/휴일에 핵심 근무창 자체를 OT로 집계하는 경우(예: D4 08:00~17:00, 일요일 1배)
+        # break_sum 미차감 시 9:00처럼 과다 집계되므로, 교대 공통 규칙으로 분 단위 차감한다.
+        if _ot_range_matches_core_shift(rng, shift_def):
+            mins = max(0, mins - _break_sum_minutes(shift_def))
+            if mins <= 0:
+                continue
         rate = _ot_rate_for_range(rng, monthly_pay, band)
         if rate is None:
             continue
         bi = _oth_index_from_rate(rate)
+        if bi is None:
+            continue
         out[bi] += mins
-        matched += mins
-    total = int((hi - lo).total_seconds() // 60)
-    if matched < total:
-        out[0] += total - matched
     return out
+
+
+def _compute_punch_ot_buckets(
+    work_day: date,
+    time_in: Optional[datetime],
+    time_out: Optional[datetime],
+    shift_def: Optional[AttendanceShift],
+    monthly_pay: bool,
+    band: str,
+) -> List[int]:
+    """정규 근로 시작·종료(`start_work`~`time_out`) 밖의 실근무 구간을 OT로 분배.
+
+    - 정규 시작 전 출근: [실출근, 정규시작) 교차 구간
+    - 정규 종료 후 근무: [정규종료, 실퇴근) 교차 구간
+    교대에 근무 시작·퇴근 시각이 없으면 0.
+
+    야간 교대(NN 등): 근무시작·퇴근이 서로 다른 달력일이면 핵심 근무창이 자정을 넘긴다.
+    **평일(`wd`)** 에는 근무시작(`start_work`) 이전의 조기 출근(예: 19:23~20:00)이
+    OT 표의 낮 구간(12:01~20:00)과 겹쳐 1.5배로 잡힐 수 있으나, 현장 규칙상 야간 핵심(20:00~익일 퇴근시각) **이후**
+    익일 새벽 OT(05:31~…)만 집계하는 경우가 많아 이 구간은 타각 OT에서 제외한다.
+    일요·휴일(`sun`/`holiday`)은 기존처럼 시작 전 구간도 OT 표로 분배한다.
+    """
+    out = [0, 0, 0, 0, 0, 0]
+    if not time_in or not time_out or not shift_def:
+        return out
+    lo = time_in.replace(microsecond=0)
+    hi = time_out.replace(microsecond=0)
+    # 익일 새벽 퇴근이 같은 달력일·이른 시각으로만 들어온 경우(야간 NN 등)
+    if hi <= lo:
+        hi = hi + timedelta(days=1)
+    if hi <= lo:
+        return out
+    st_in_s = (shift_def.start_work or shift_def.start_check_in or "").strip()
+    st_out_s = (shift_def.time_out or "").strip()
+    if not st_in_s or not st_out_s:
+        return out
+    sw = _combine_local(work_day, st_in_s, next_day=False)
+    ew = _combine_local(work_day, st_out_s, next_day=False)
+    if not sw or not ew:
+        return out
+    if ew <= sw:
+        ew = _combine_local(work_day, st_out_s, next_day=True)
+
+    # 야간 핵심: 정규 시작·종료가 서로 다른 달력일(대개 start_work 당일 저녁 ~ 익일 새벽 time_out)
+    night_core_cross_midnight = sw.date() != ew.date() and ew > sw
+    skip_pre_start_on_weekday_night = bool(night_core_cross_midnight and band == "wd")
+
+    intervals: List[Tuple[datetime, datetime]] = []
+    # 일요/휴일 근무는 핵심 근무창(sw~ew)도 OT 표로 집계한다.
+    # (예: D4 일요일 08:00~17:00은 OT 1배)
+    if band in ("sun", "holiday"):
+        core_lo = max(lo, sw)
+        core_hi = min(hi, ew)
+        if core_hi > core_lo:
+            intervals.append((core_lo, core_hi))
+    if lo < sw and not skip_pre_start_on_weekday_night:
+        seg_hi = min(hi, sw)
+        if seg_hi > lo:
+            intervals.append((lo, seg_hi))
+    if hi > ew:
+        seg_lo = max(lo, ew)
+        if hi > seg_lo:
+            intervals.append((seg_lo, hi))
+
+    for a, b in intervals:
+        bks = _minutes_to_buckets_for_interval(work_day, a, b, shift_def, monthly_pay, band)
+        for j in range(6):
+            out[j] += int(bks[j] or 0)
+    return out
+
+
+def _collect_auto_ot_day_buckets(
+    cur: date,
+    emp_id: int,
+    time_in: Optional[datetime],
+    time_out: Optional[datetime],
+    shift_def: Optional[AttendanceShift],
+    monthly_pay: bool,
+    ot_band: str,
+    suppress_holiday_calendar_ot: bool,
+    additional_by_emp_day: DefaultDict[Tuple[int, date], List[AttendanceAdditionalOt]],
+    special_by_emp_day: DefaultDict[Tuple[int, date], List[AttendanceSpecialOt]],
+) -> Tuple[List[int], List[int], List[int]]:
+    """자동OT가 켜졌을 때(휴일제외로 막히지 않은 날) 당일 합산될 타각·추가·특별 OT 버킷."""
+    z = [0, 0, 0, 0, 0, 0]
+    if suppress_holiday_calendar_ot:
+        return z[:], z[:], z[:]
+    punch = _compute_punch_ot_buckets(cur, time_in, time_out, shift_def, monthly_pay, ot_band)
+    add = [0, 0, 0, 0, 0, 0]
+    for ao in additional_by_emp_day.get((emp_id, cur), []):
+        st = str(getattr(ao, "ot_start", "") or "")
+        ed = str(getattr(ao, "ot_end", "") or "")
+        sa = _combine_local(cur, st, next_day=False)
+        ea = _combine_local(cur, ed, next_day=False)
+        if not sa or not ea:
+            continue
+        if ea <= sa:
+            ea = _combine_local(cur, ed, next_day=True)
+        if not ea or ea <= sa:
+            continue
+        bks = _minutes_to_buckets_for_interval(cur, sa, ea, shift_def, monthly_pay, ot_band)
+        for j in range(6):
+            add[j] += int(bks[j] or 0)
+    special = [0, 0, 0, 0, 0, 0]
+    for so in special_by_emp_day.get((emp_id, cur), []):
+        special[0] += _parse_minutes_hhmm(getattr(so, "ot_1", None))
+        special[1] += _parse_minutes_hhmm(getattr(so, "ot_1_5", None))
+        special[2] += _parse_minutes_hhmm(getattr(so, "ot_2", None))
+        special[3] += _parse_minutes_hhmm(getattr(so, "ot_2_5", None))
+        special[4] += _parse_minutes_hhmm(getattr(so, "ot_3", None))
+        special[5] += _parse_minutes_hhmm(getattr(so, "ot_6", None))
+    return punch, add, special
 
 
 def _extract_prev_applied(row: Optional[AttendanceTimeDay], prefix: str) -> List[int]:
@@ -517,6 +690,37 @@ def _food_allowance_base_from_shift(
     return max(grid_amt, legacy)
 
 
+def _ot_food_allowance_from_shift(
+    shift_def: Optional[AttendanceShift],
+    monthly_pay: bool,
+    band: str,
+    early_minutes: int,
+) -> int:
+    """OT 식대(조퇴 포함·식대).
+
+    - 값 소스: OT 표 하단 `shift_allowance_early_food_json`의 월급/시급 × 평일/일요/휴일.
+    - `enabled=True`이면 조퇴가 있어도 지급, `enabled=False`이면 조퇴일 때 미지급.
+    - JSON이 없거나 값이 0이면 0.
+    """
+    if not shift_def:
+        return 0
+    raw = getattr(shift_def, "shift_allowance_early_food_json", None)
+    if not isinstance(raw, dict):
+        return 0
+    include_when_early = bool(raw.get("enabled"))
+    if early_minutes > 0 and not include_when_early:
+        return 0
+    pay_key = "monthly" if monthly_pay else "daily"
+    sub = raw.get(pay_key)
+    if not isinstance(sub, dict):
+        return 0
+    if band == "holiday":
+        return _int_nonneg(sub.get("holiday"))
+    if band == "sun":
+        return _int_nonneg(sub.get("sunday"))
+    return _int_nonneg(sub.get("weekday"))
+
+
 class AttendanceAggregateService:
     def __init__(self, db: Session):
         self.db = db
@@ -532,10 +736,15 @@ class AttendanceAggregateService:
         company_id: Optional[int] = None,
         employee_ids: Optional[List[int]] = None,
         work_dates: Optional[Set[date]] = None,
+        *,
+        preserve_manual_ot: bool = False,
     ) -> Iterator[Dict[str, Any]]:
         """직원 단위로 진행률 이벤트를 내보낸 뒤 최종 결과를 `type==done` 으로 반환.
 
         work_dates가 주어지면 해당 일자만 집계하며, 조회 구간은 min~max로 자동 좁힙니다.
+
+        preserve_manual_ot: False(기본)이면 oth1~6은 타각·추가·특별 자동분만 저장(과거 잘못된 oth·agg 불일치로 남은 수기 잔여 미보존).
+        True이면 기존처럼 (저장된 oth − 직전 agg_* 적용분)을 수기로 간주해 자동분과 합산합니다.
         """
         allowed = self._allowed_company_ids(user)
         if not allowed:
@@ -554,13 +763,14 @@ class AttendanceAggregateService:
 
         warnings: List[str] = []
         unmapped: List[str] = [
-            "기본(타각 기반) OT 자동 계산은 비활성화되었습니다. OT는 기존 수기 입력 + 추가OT + 특별OT만 합산합니다.",
-            "교대 OT 구간에서 월급/시급·평일/일요/휴일 칸이 비어 있거나 0이면 해당 시간대는 OT로 넣지 않습니다(잔여 분을 OT1배로 흘리지 않음).",
+            "근태마스터 「자동OT생성」이 꺼진 직원은 집계 시 oth1~6·agg_*·othb(OT분 0일 때)를 모두 0으로 맞춥니다. 켜진 직원만 타각·추가·특별 OT를 집계합니다.",
+            "기본 정책: 일괄 집계 시 oth1~6은 이전 행에서 남은 「수기 잔여」를 더하지 않고, 타각·추가·특별 OT 자동분만 저장합니다. 화면에서 oth를 직접 넣은 값을 직전 집계분과 합산해 유지하려면 API 본문에 preserve_manual_ot: true 를 넣습니다.",
+            "타각 OT는 교대의 근무시작·퇴근 시각 바깥 구간만 OT 표(월급/시급·평일/일요/휴일) 배수로 나눕니다. 칸이 비어 있거나 0이면 해당 교집합 분은 어떤 oth 버킷에도 넣지 않습니다.",
             "일반 식대(food_allowance)는 출근(time_in)이 있을 때만 지급합니다. 조퇴·식대 JSON이 enabled이면 그 표만 쓰고, 아니면 food_monthly/food_daily와 allowance_food_* 중 큰 값만 사용합니다.",
             "overtime_pay_local(태국어 현지 OT표시 등)은 별도 단가 테이블이 없어 집계하지 않습니다. othb는 근태마스터 OT 탭의 OT6 시간당(바트)이 있을 때만 총 OT분×단가로 채웁니다.",
             "휴가는 DB `leaves` 테이블(승인 건)만 집계하며, 휴가관리 UI 전용 테이블이 따로 있으면 연동이 필요합니다.",
             "반올림은 회사당 `lateness`/`early_checkout`/`ot` 탭의 첫 번째 섹션만 적용합니다(복수 섹션은 미적용).",
-            "추가OT는 해당 일자의 교대 OT 시간대와 월급/시급·평일/일요/휴일 배수로 분배합니다(시간대 밖 분은 OT1배수로 처리).",
+            "추가OT는 해당 일자의 교대 OT 시간대와 월급/시급·평일/일요/휴일 배수로 분배합니다. 배수가 없는 교집합 분은 oth에 넣지 않습니다.",
             "특별OT는 date_from~date_to 기간의 각 일자에 OT1/1.5/2/2.5/3/6 값을 분 단위로 합산합니다.",
         ]
 
@@ -835,11 +1045,28 @@ class AttendanceAggregateService:
                     manual_day_row = existing_day_by_emp_day.get((int(emp.id), cur))
 
                     band = _day_band(cur, cid, holiday_dates, is_calendar_workday=is_workday)
-                    calc_ot_day = calc_ot and not (exclude_non_wd_ot and band != "wd")
+                    # 자동OT생성: 타각 OT + 추가OT + 특별OT를 근무달력(`is_workday`, `ot_band`) 기준으로 가산.
+                    # 휴일제외: 달력상 비근무일이어도 **해당 일에 교대가 배정된 경우**는 타각 OT를 집계한다.
+                    # (일요·휴무일이어도 D4 등 교대가 찍혀 있으면 OT표의 일요/휴일 칸을 써야 함)
+                    has_assigned_shift = bool((shift_code or "").strip() and shift_def)
+                    suppress_holiday_calendar_ot = bool(
+                        calc_ot and exclude_non_wd_ot and not is_workday and not has_assigned_shift
+                    )
+                    calc_ot_day = bool(calc_ot and not suppress_holiday_calendar_ot)
                     raw_pd = sorted(punch_by_emp_day.get((int(emp.id), cur), []))
                     if spill_closing_punch is not None and spill_closing_punch.date() == cur:
                         sp0 = spill_closing_punch.replace(microsecond=0)
                         raw_pd = [p for p in raw_pd if p.replace(microsecond=0) != sp0]
+                    # 야간 교대에서 당일 새벽 카드(예: 03:53)와 당일 저녁 출근 카드(예: 19:59)가 함께 있으면
+                    # 새벽 카드는 전일 퇴근 후보로만 쓰고, 당일 출근/퇴근 계산에서는 제외한다.
+                    # (전일 집계는 _time_out_cross_midnight 에서 punch_by_emp_day 원본을 사용하므로 영향 없음)
+                    if raw_pd and _is_cross_midnight_shift(shift_def):
+                        gate_today = _shift_earliest_checkin(cur, shift_def)
+                        if gate_today is not None:
+                            has_before_gate = any(p < gate_today for p in raw_pd)
+                            has_after_gate = any(p >= gate_today for p in raw_pd)
+                            if has_before_gate and has_after_gate:
+                                raw_pd = [p for p in raw_pd if p >= gate_today]
                     punches_day = raw_pd
                     time_in = punches_day[0] if punches_day else None
                     deadline_ot = _max_ot_range_end(cur, shift_def) if shift_def else None
@@ -873,6 +1100,18 @@ class AttendanceAggregateService:
                         if punches_day
                         else None
                     )
+                    # 야간 교대: 익일 퇴근 타각이 당일 punch 리스트에 없으면 cross_midnight가
+                    # 당일만 보고 time_out <= time_in 이 되어 None 처리됨 → OT 역산(hypo)이 0으로 남는 문제.
+                    if time_in is not None and (time_out is None or time_out <= time_in):
+                        fb = _fallback_time_out_from_following_days(
+                            cur, int(emp.id), time_in, punch_by_emp_day
+                        )
+                        if fb is not None:
+                            time_out = fb
+                    if time_in is not None and (time_out is None or time_out <= time_in):
+                        sto = getattr(manual_day_row, "time_out", None) if manual_day_row else None
+                        if sto is not None and sto > time_in:
+                            time_out = sto.replace(microsecond=0)
                     # 전일 spill로 당일 첫 타각이 빠진 뒤 저녁 출근만 남은 경우 등: 퇴근 타각이 없으면
                     # 단일 타각을 퇴근으로 쓰지 않는다(출근=퇴근 동일시각 방지).
                     if time_in is not None and time_out is not None and time_out <= time_in:
@@ -905,6 +1144,7 @@ class AttendanceAggregateService:
                     early_raw = 0
                     prev_add_applied = _extract_prev_applied(manual_day_row, "agg_additional")
                     prev_special_applied = _extract_prev_applied(manual_day_row, "agg_special")
+                    prev_punch_applied = _extract_prev_applied(manual_day_row, "agg_punch")
                     existing_raw = [
                         _int_nonneg(getattr(manual_day_row, "oth1", 0) if manual_day_row else 0),
                         _int_nonneg(getattr(manual_day_row, "oth2", 0) if manual_day_row else 0),
@@ -913,12 +1153,6 @@ class AttendanceAggregateService:
                         _int_nonneg(getattr(manual_day_row, "oth5", 0) if manual_day_row else 0),
                         _int_nonneg(getattr(manual_day_row, "oth6", 0) if manual_day_row else 0),
                     ]
-                    manual_base_buckets = [
-                        max(0, existing_raw[j] - prev_add_applied[j] - prev_special_applied[j]) for j in range(6)
-                    ]
-                    ot_minutes_by_bucket = manual_base_buckets[:]
-                    day_additional_buckets = [0, 0, 0, 0, 0, 0]
-                    day_special_buckets = [0, 0, 0, 0, 0, 0]
 
                     absent = False
                     is_sun = cur.weekday() == 6  # 월=0 … 일=6
@@ -980,34 +1214,54 @@ class AttendanceAggregateService:
                     if basic and getattr(basic, "not_rounding_early", False):
                         early_fin = max(0, int(early_raw))
 
-                    # 기본(타각 기반) OT 계산은 비활성화한다.
-                    # OT는 '추가OT + 특별OT (+ 기존 수기 OT)'만으로 구성한다.
+                    # 자동OT생성 ON: 타각+추가+특별(휴일제외일은 가산 안 함). OFF: OT 전부 0(역산 없음).
                     ot_band = _day_band(cur, cid, holiday_dates, is_calendar_workday=is_workday)
-                    for ao in additional_by_emp_day.get((int(emp.id), cur), []):
-                        st = str(getattr(ao, "ot_start", "") or "")
-                        ed = str(getattr(ao, "ot_end", "") or "")
-                        sa = _combine_local(cur, st, next_day=False)
-                        ea = _combine_local(cur, ed, next_day=False)
-                        if not sa or not ea:
-                            continue
-                        if ea <= sa:
-                            ea = _combine_local(cur, ed, next_day=True)
-                        if not ea or ea <= sa:
-                            continue
-                        bks = _minutes_to_buckets_for_interval(cur, sa, ea, shift_def, monthly_pay, ot_band)
-                        for j in range(6):
-                            day_additional_buckets[j] += int(bks[j] or 0)
+                    apply_auto_ot = bool(calc_ot and not suppress_holiday_calendar_ot)
+                    if calc_ot:
+                        hypo_punch, hypo_add, hypo_spec = _collect_auto_ot_day_buckets(
+                            cur,
+                            int(emp.id),
+                            time_in,
+                            time_out,
+                            shift_def,
+                            monthly_pay,
+                            ot_band,
+                            suppress_holiday_calendar_ot,
+                            additional_by_emp_day,
+                            special_by_emp_day,
+                        )
+                        if preserve_manual_ot:
+                            manual_base_buckets = [
+                                max(
+                                    0,
+                                    existing_raw[j]
+                                    - prev_add_applied[j]
+                                    - prev_special_applied[j]
+                                    - prev_punch_applied[j],
+                                )
+                                for j in range(6)
+                            ]
+                        else:
+                            manual_base_buckets = [0, 0, 0, 0, 0, 0]
+                        if apply_auto_ot:
+                            day_punch_buckets = hypo_punch
+                            day_additional_buckets = hypo_add
+                            day_special_buckets = hypo_spec
+                        else:
+                            day_punch_buckets = [0, 0, 0, 0, 0, 0]
+                            day_additional_buckets = [0, 0, 0, 0, 0, 0]
+                            day_special_buckets = [0, 0, 0, 0, 0, 0]
+                    else:
+                        manual_base_buckets = [0, 0, 0, 0, 0, 0]
+                        day_punch_buckets = [0, 0, 0, 0, 0, 0]
+                        day_additional_buckets = [0, 0, 0, 0, 0, 0]
+                        day_special_buckets = [0, 0, 0, 0, 0, 0]
 
-                    for so in special_by_emp_day.get((int(emp.id), cur), []):
-                        day_special_buckets[0] += _parse_minutes_hhmm(getattr(so, "ot_1", None))
-                        day_special_buckets[1] += _parse_minutes_hhmm(getattr(so, "ot_1_5", None))
-                        day_special_buckets[2] += _parse_minutes_hhmm(getattr(so, "ot_2", None))
-                        day_special_buckets[3] += _parse_minutes_hhmm(getattr(so, "ot_2_5", None))
-                        day_special_buckets[4] += _parse_minutes_hhmm(getattr(so, "ot_3", None))
-                        day_special_buckets[5] += _parse_minutes_hhmm(getattr(so, "ot_6", None))
-
+                    ot_minutes_by_bucket = manual_base_buckets[:]
                     for j in range(6):
-                        ot_minutes_by_bucket[j] += day_additional_buckets[j] + day_special_buckets[j]
+                        ot_minutes_by_bucket[j] += (
+                            day_punch_buckets[j] + day_additional_buckets[j] + day_special_buckets[j]
+                        )
 
                     # OT 반올림(근태기준정보관리 > 반올림 > OT) 적용
                     if calc_ot_day:
@@ -1026,15 +1280,18 @@ class AttendanceAggregateService:
                     food_base = _food_allowance_base_from_shift(shift_def, monthly_pay, band)
 
                     # 정책: 휴가/무급휴가/결석일에는 수당 미계산.
-                    # 단, OT(기존 수기 + 추가OT + 특별OT)는 유지한다.
+                    # 단, OT(수기 잔여는 preserve_manual_ot 일 때만 + 타각·추가·특별 자동분)는 유지한다.
                     block_ot_and_allowance = bool(absent or leave_frac > 0.0 or unpaid_touch)
 
                     ot_total_min = sum(ot_minutes_by_bucket)
                     food_ot = 0
                     if shift_def and ot_total_min > 0:
-                        cthr = int(shift_def.continuous_ot_minutes or 0)
-                        if ot_total_min >= cthr or cthr == 0:
-                            food_ot = int(shift_def.food_daily or shift_def.work_holiday_daily or 0)
+                        food_ot = _ot_food_allowance_from_shift(
+                            shift_def,
+                            monthly_pay,
+                            band,
+                            early_fin,
+                        )
 
                     shift_allow = int(shift_def.allowance_shift or 0) if shift_def else 0
                     if block_ot_and_allowance:
@@ -1059,7 +1316,7 @@ class AttendanceAggregateService:
                         work_day_count_str = "0"
                     elif leave_frac >= 1.0:
                         work_day_count_str = "0"
-                    elif time_in:
+                    elif time_in and time_out:
                         work_day_count_str = f"{max(0.0, 1.0 - leave_frac):.2f}"
 
                     memo_parts: List[str] = []
@@ -1147,6 +1404,12 @@ class AttendanceAggregateService:
                         "absent_time": absent_minutes if absent_minutes else None,
                         "absent_days": absent_days if absent_days > 0 else None,
                         "work_day_count": work_day_count_str,
+                        "agg_punch_oth1": day_punch_buckets[0],
+                        "agg_punch_oth2": day_punch_buckets[1],
+                        "agg_punch_oth3": day_punch_buckets[2],
+                        "agg_punch_oth4": day_punch_buckets[3],
+                        "agg_punch_oth5": day_punch_buckets[4],
+                        "agg_punch_oth6": day_punch_buckets[5],
                         "agg_additional_oth1": day_additional_buckets[0],
                         "agg_additional_oth2": day_additional_buckets[1],
                         "agg_additional_oth3": day_additional_buckets[2],
@@ -1161,12 +1424,14 @@ class AttendanceAggregateService:
                         "agg_special_oth6": day_special_buckets[5],
                     }
 
-                    if ot_m and ot_m.ot6_hourly_baht and ot_total_min > 0:
+                    if ot_total_min > 0 and ot_m and ot_m.ot6_hourly_baht:
                         try:
                             hourly = float(ot_m.ot6_hourly_baht)
                             body["othb"] = round((ot_total_min / 60.0) * hourly, 2)
                         except Exception:
-                            pass
+                            body["othb"] = None
+                    else:
+                        body["othb"] = None
 
                     day_svc.upsert_employee_day_row(int(emp.id), user, cur, body)
                     rows_written += 1
@@ -1204,9 +1469,19 @@ class AttendanceAggregateService:
         company_id: Optional[int] = None,
         employee_ids: Optional[List[int]] = None,
         work_dates: Optional[Set[date]] = None,
+        *,
+        preserve_manual_ot: bool = False,
     ) -> Dict[str, Any]:
         result: Optional[Dict[str, Any]] = None
-        for ev in self.iter_run(user, date_from, date_to, company_id, employee_ids, work_dates):
+        for ev in self.iter_run(
+            user,
+            date_from,
+            date_to,
+            company_id,
+            employee_ids,
+            work_dates,
+            preserve_manual_ot=preserve_manual_ot,
+        ):
             if ev.get("type") == "done":
                 result = ev.get("result")
         if not result:

@@ -580,7 +580,7 @@ const ko: TranslationDict = {
   'attendanceMaster.ot.notChargeSend': 'OT 급여 미전송',
   'attendanceMaster.ot.payEachHour': '시간당 OT(OT6)',
   'attendanceMaster.ot.changAll': 'OT6 일괄 변경',
-  'attendanceMaster.ot.autoHoliday': '자동OT생성(휴일포함)',
+  'attendanceMaster.ot.autoHoliday': '자동OT생성',
   'attendanceMaster.ot.excludeHoliday': '휴일제외',
   'attendanceMaster.ot.ot6Baht': 'OT6 시간당(바트)',
   'attendanceMaster.ot.lunchBaht': '점심(직원별, 바트)',

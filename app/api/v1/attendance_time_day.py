@@ -3,7 +3,7 @@ import json
 from datetime import date
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,15 @@ def _pd(v: Optional[str]) -> Optional[date]:
         return None
 
 
+def _bool_from_body(v: Any, default: bool = False) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    return s in ("1", "true", "yes", "y", "on")
+
+
 def _work_dates_from_body(body: Dict[str, Any]) -> Optional[Set[date]]:
     """선택: 특정 근무일만 집계(근태/OT/수당관리 화면 등)."""
     wd_raw = body.get("work_dates")
@@ -45,6 +54,7 @@ def _work_dates_from_body(body: Dict[str, Any]) -> Optional[Set[date]]:
 
 @router.get("/time-day", response_model=Dict[str, List[Dict[str, Any]]])
 def list_time_day(
+    response: Response,
     employee_id: int = Query(..., ge=1),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -58,6 +68,8 @@ def list_time_day(
             _pd(date_from),
             _pd(date_to),
         )
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
         return {"items": items}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -65,6 +77,7 @@ def list_time_day(
 
 @router.get("/time-day/all", response_model=Dict[str, Any])
 def list_time_day_all(
+    response: Response,
     company_id: Optional[int] = Query(None, ge=1),
     employee_id: Optional[int] = Query(None, ge=1),
     department: Optional[str] = Query(None),
@@ -79,7 +92,7 @@ def list_time_day_all(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return AttendanceTimeDayService(db).list_all_for_period(
+    out = AttendanceTimeDayService(db).list_all_for_period(
         user=current_user,
         company_id=company_id,
         employee_id=employee_id,
@@ -93,6 +106,9 @@ def list_time_day_all(
         page=page,
         page_size=page_size,
     )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return out
 
 
 @router.get("/time-day/report-summary", response_model=Dict[str, Any])
@@ -177,7 +193,11 @@ def run_time_day_aggregate(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """기간·회사·직원 범위로 타각·근태기준·마스터를 반영해 `attendance_time_day`를 일괄 UPSERT."""
+    """기간·회사·직원 범위로 타각·근태기준·마스터를 반영해 `attendance_time_day`를 일괄 UPSERT.
+
+    선택: preserve_manual_ot (기본 false) — false이면 oth1~6을 자동분만 저장(과거 oth 수기 잔여 미보존).
+    true이면 기존처럼 저장된 oth에서 직전 agg_* 분을 뺀 수기 잔여를 자동분과 합산합니다.
+    """
     df = _pd(body.get("date_from"))
     dt = _pd(body.get("date_to"))
     if not df or not dt:
@@ -201,6 +221,7 @@ def run_time_day_aggregate(
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="employee_ids 항목은 정수여야 합니다.") from None
     work_dates_set = _work_dates_from_body(body)
+    preserve_manual = _bool_from_body(body.get("preserve_manual_ot"), default=False)
     try:
         return AttendanceAggregateService(db).run(
             current_user,
@@ -209,6 +230,7 @@ def run_time_day_aggregate(
             company_id=company_id,
             employee_ids=employee_ids,
             work_dates=work_dates_set,
+            preserve_manual_ot=preserve_manual,
         )
     except ValueError as e:
         msg = str(e)
@@ -247,6 +269,7 @@ def run_time_day_aggregate_stream(
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="employee_ids 항목은 정수여야 합니다.") from None
     work_dates_set = _work_dates_from_body(body)
+    preserve_manual = _bool_from_body(body.get("preserve_manual_ot"), default=False)
 
     def ndjson_iter():
         try:
@@ -257,6 +280,7 @@ def run_time_day_aggregate_stream(
                 company_id=company_id,
                 employee_ids=employee_ids,
                 work_dates=work_dates_set,
+                preserve_manual_ot=preserve_manual,
             ):
                 yield (json.dumps(ev, ensure_ascii=False) + "\n").encode("utf-8")
         except ValueError as e:

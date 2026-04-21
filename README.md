@@ -97,6 +97,8 @@ pip install -r requirements.txt
 ```bash
 # .env.example을 복사하여 .env 파일 생성
 cp .env.example .env
+# (Windows PowerShell)
+copy .env.example .env
 
 # .env 파일을 편집하여 필요한 값 설정
 # 특히 OPENAI_API_KEY와 DATABASE_URL을 설정해야 합니다
