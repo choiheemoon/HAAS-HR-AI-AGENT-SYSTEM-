@@ -69,6 +69,7 @@ DEFAULT_APP_MENUS: Tuple[Tuple[str, str, int], ...] = (
     ("system-role-groups", "menu.systemRoleGroups", 203),
     ("system-role-group-menus", "menu.systemRoleGroupMenus", 204),
     ("system-template-generation", "menu.systemTemplateGeneration", 205),
+    ("system-schedule-manage", "menu.scheduleManage", 206),
 )
 
 # RBAC 매트릭스에서 제외(기존 DB 행은 seed 시 삭제). 탭 권한은 TAB_PERMISSION_ALIAS 로 위임.

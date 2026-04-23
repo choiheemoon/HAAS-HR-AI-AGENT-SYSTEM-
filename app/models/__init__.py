@@ -34,6 +34,7 @@ from app.models.attendance_time_day import AttendanceTimeDay
 from app.models.attendance_additional_ot import AttendanceAdditionalOt
 from app.models.attendance_special_ot import AttendanceSpecialOt
 from app.models.attendance_payroll_bucket_aggregate import AttendancePayrollBucketAggregate
+from app.models.job_schedule import JobSchedule, JobScheduleRun
 from app.models.attendance_standard import (
     AttendanceCompanyHoliday,
     AttendanceCompanySettings,
@@ -95,6 +96,8 @@ __all__ = [
     "AttendanceAdditionalOt",
     "AttendanceSpecialOt",
     "AttendancePayrollBucketAggregate",
+    "JobSchedule",
+    "JobScheduleRun",
     "AttendanceCompanySettings",
     "AttendanceSpecialAllowance",
     "AttendanceShift",

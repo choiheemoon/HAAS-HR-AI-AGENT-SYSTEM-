@@ -1,15 +1,18 @@
-"""시스템 관리 API (사용자·권한그룹·메뉴 권한)"""
-from fastapi import APIRouter, Depends, HTTPException, Query
+"""시스템 관리 API (사용자·권한그룹·메뉴 권한·스케줄)."""
+import json
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List
 from pydantic import BaseModel
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.api.deps import require_system_admin
 from app.services.system_rbac_service import SystemRbacService
 from app.services.onboarding_setup_service import OnboardingSetupService
 from app.models.user import User
+from app.config import settings
+from app.utils.email_sender import send_email
 from app.schemas.system_rbac import (
     PermissionGroupCreate,
     PermissionGroupUpdate,
@@ -22,6 +25,15 @@ from app.schemas.system_rbac import (
     AdminUserUpdate,
     UserCompanyIdsPut,
 )
+from app.schemas.job_schedule import (
+    JobScheduleCreate,
+    JobScheduleListResponse,
+    JobScheduleResponse,
+    JobScheduleRunNowResponse,
+    JobScheduleRunResponse,
+    JobScheduleUpdate,
+)
+from app.services.job_schedule_service import JobScheduleService
 
 router = APIRouter(dependencies=[Depends(require_system_admin)])
 
@@ -36,8 +48,34 @@ class TemplateGenerationRequest(BaseModel):
     system_rbac: bool = True
 
 
+class SmtpTestRequest(BaseModel):
+    to_email: str | None = None
+    subject: str | None = None
+    body: str | None = None
+
+
+class SmtpTestResponse(BaseModel):
+    ok: bool
+    to_email: str
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_from: str
+    smtp_use_tls: bool
+    message: str
+
+
 def _svc(db: Session) -> SystemRbacService:
     return SystemRbacService(db)
+
+
+def _run_schedule_background(schedule_id: int, trigger: str) -> None:
+    """요청 타임아웃을 피하기 위해 즉시실행을 백그라운드로 수행."""
+    db = SessionLocal()
+    try:
+        JobScheduleService(db).execute_schedule(int(schedule_id), trigger=trigger)
+    finally:
+        db.close()
 
 
 # —— 메뉴(시드) ——
@@ -246,3 +284,162 @@ def run_template_generation(
         raise HTTPException(
             status_code=500, detail=f"템플릿 생성(기준정보) 중 오류가 발생했습니다: {str(e)}"
         ) from e
+
+
+def _schedule_to_response(row) -> JobScheduleResponse:
+    payload = {}
+    try:
+        if row.payload_json:
+            v = json.loads(row.payload_json)
+            payload = v if isinstance(v, dict) else {}
+    except Exception:
+        payload = {}
+    return JobScheduleResponse(
+        id=int(row.id),
+        name=row.name,
+        job_type=row.job_type,
+        enabled=bool(row.enabled),
+        time_local=row.time_local,
+        timezone=row.timezone,
+        weekdays_mask=int(row.weekdays_mask),
+        run_as_user_id=int(row.run_as_user_id),
+        company_id=row.company_id,
+        payload=payload,
+        last_run_at=row.last_run_at,
+        next_run_at=row.next_run_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _run_to_response(row) -> JobScheduleRunResponse:
+    result = {}
+    try:
+        if row.result_json:
+            v = json.loads(row.result_json)
+            result = v if isinstance(v, dict) else {}
+    except Exception:
+        result = {}
+    return JobScheduleRunResponse(
+        id=int(row.id),
+        schedule_id=int(row.schedule_id),
+        status=row.status,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        message=row.message,
+        result=result,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.get("/job-schedules", response_model=JobScheduleListResponse)
+def list_job_schedules(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    svc = JobScheduleService(db)
+    items = [_schedule_to_response(r) for r in svc.list_schedules()]
+    return JobScheduleListResponse(items=items)
+
+
+@router.post("/job-schedules", response_model=JobScheduleResponse)
+def create_job_schedule(
+    body: JobScheduleCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    try:
+        row = JobScheduleService(db).create_schedule(body.model_dump())
+        return _schedule_to_response(row)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.put("/job-schedules/{schedule_id}", response_model=JobScheduleResponse)
+def update_job_schedule(
+    schedule_id: int,
+    body: JobScheduleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    try:
+        row = JobScheduleService(db).update_schedule(schedule_id, body.model_dump(exclude_unset=True))
+        return _schedule_to_response(row)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete("/job-schedules/{schedule_id}")
+def delete_job_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    try:
+        JobScheduleService(db).delete_schedule(schedule_id)
+        return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/job-schedules/{schedule_id}/runs", response_model=list[JobScheduleRunResponse])
+def list_job_schedule_runs(
+    schedule_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    rows = JobScheduleService(db).list_runs(schedule_id, limit=limit)
+    return [_run_to_response(r) for r in rows]
+
+
+@router.post("/job-schedules/{schedule_id}/run-now", response_model=JobScheduleRunNowResponse)
+def run_job_schedule_now(
+    schedule_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    svc = JobScheduleService(db)
+    rows = svc.list_schedules()
+    target = next((r for r in rows if int(r.id) == int(schedule_id)), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="스케줄을 찾을 수 없습니다.")
+    # 근태/OT/수당 집계는 실행 시간이 길어 HTTP 타임아웃이 발생할 수 있어 비동기 처리한다.
+    # 실행 결과(성공/실패)는 JobScheduleRun 이력으로 저장된다.
+    if str(target.job_type) == "attendance_ot_allowance_aggregate":
+        background_tasks.add_task(_run_schedule_background, int(schedule_id), "manual_api_bg")
+        return JobScheduleRunNowResponse(ok=True, schedule_id=int(schedule_id), message="queued")
+    try:
+        svc.execute_schedule(int(schedule_id), trigger="manual_api")
+        return JobScheduleRunNowResponse(ok=True, schedule_id=int(schedule_id), message="completed")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/email/test", response_model=SmtpTestResponse)
+def send_smtp_test_email(
+    body: SmtpTestRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_system_admin),
+):
+    to_email = (body.to_email or settings.SMTP_USER or "").strip()
+    if not to_email:
+        raise HTTPException(status_code=400, detail="수신 이메일(to_email)이 비어 있습니다.")
+    subject = (body.subject or "[HR AI AGENT] SMTP 연결 테스트").strip()
+    msg_body = (body.body or "이 메일은 시스템관리 > SMTP 테스트 엔드포인트에서 발송되었습니다.").strip()
+    try:
+        send_email(to_email, subject, msg_body)
+        return SmtpTestResponse(
+            ok=True,
+            to_email=to_email,
+            smtp_host=str(settings.SMTP_HOST or ""),
+            smtp_port=int(settings.SMTP_PORT),
+            smtp_user=str(settings.SMTP_USER or ""),
+            smtp_from=str(settings.SMTP_FROM or settings.SMTP_USER or ""),
+            smtp_use_tls=bool(settings.SMTP_USE_TLS),
+            message="SMTP test email sent",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e

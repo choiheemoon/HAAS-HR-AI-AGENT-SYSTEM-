@@ -45,6 +45,9 @@ env/
 *.log
 logs/
 
+# Local dev (portable Redis 등)
+.dev/
+
 # Storage
 storage/
 *.pdf

@@ -54,11 +54,19 @@ class Settings(BaseSettings):
     SMTP_HOST: Optional[str] = None
     SMTP_PORT: int = 587
     SMTP_USER: Optional[str] = None
+    SMTP_FROM: Optional[str] = None
+    SMTP_USE_TLS: bool = True
     SMTP_PASSWORD: Optional[str] = None
     
     # External APIs
     JOB_SITE_API_KEY: Optional[str] = None
     TAX_API_KEY: Optional[str] = None
+
+    # Celery (스케줄/비동기 작업)
+    # 값이 없으면 로컬 Redis 기본값을 사용해 API 서버 기동이 중단되지 않게 합니다.
+    CELERY_BROKER_URL: str = "redis://127.0.0.1:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://127.0.0.1:6379/1"
+    CELERY_TIMEZONE: str = "Asia/Seoul"
     
     class Config:
         env_file = ".env"

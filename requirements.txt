@@ -9,6 +9,9 @@ sqlalchemy==2.0.23
 alembic==1.12.1
 psycopg2-binary==2.9.9
 
+# Task queue (자동 스케줄 · Celery + Redis broker)
+celery[redis]==5.3.6
+
 # AI/ML Libraries
 langchain==0.0.350
 langchain-openai==0.0.2

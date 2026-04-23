@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { X, Briefcase, Users, Clock, DollarSign, FileText, BarChart3, Receipt, LayoutDashboard, Bot, FileEdit, CheckCircle2, Send, UserPlus, FileSearch, Calendar, Award, Languages, FileSignature, ClipboardList, Search, Building2, UserCog, Shield, Share2, Link2, Database, MapPin, UsersRound, Contact, SlidersHorizontal, Calculator, Table2, LayoutList, Timer } from 'lucide-react';
+import { X, Briefcase, Users, Clock, DollarSign, FileText, BarChart3, Receipt, LayoutDashboard, Bot, FileEdit, CheckCircle2, Send, UserPlus, FileSearch, Calendar, CalendarClock, Award, Languages, FileSignature, ClipboardList, Search, Building2, UserCog, Shield, Share2, Link2, Database, MapPin, UsersRound, Contact, SlidersHorizontal, Calculator, Table2, LayoutList, Timer } from 'lucide-react';
 import Dashboard from '@/components/dashboard/Dashboard';
 import RecruitmentPage from '@/app/recruitment/page';
 import RecruitmentRequestPage from '@/app/recruitment/request/page';
@@ -58,6 +58,7 @@ import SystemRoleGroupsPage from '@/app/system/role-groups/page';
 import SystemRoleGroupMenusPage from '@/app/system/role-group-menus/page';
 import SystemUserCompaniesPage from '@/app/system/user-companies/page';
 import SystemTemplateGenerationPage from '@/app/system/template-generation/page';
+import ScheduleManagePage from '@/app/schedule/manage/page';
 import ChatPage from '@/app/chat/page';
 import { TabDataProvider } from '@/contexts/TabDataContext';
 import { useI18n } from '@/contexts/I18nContext';
@@ -121,6 +122,7 @@ const tabComponents: { [key: string]: React.ComponentType } = {
   'system-role-groups': SystemRoleGroupsPage,
   'system-role-group-menus': SystemRoleGroupMenusPage,
   'system-template-generation': SystemTemplateGenerationPage,
+  'system-schedule-manage': ScheduleManagePage,
   chat: ChatPage,
 };
 
@@ -181,6 +183,7 @@ const tabLabels: { [key: string]: { labelKey: string; icon: any; step?: number }
   'system-role-groups': { labelKey: 'menu.systemRoleGroups', icon: Shield },
   'system-role-group-menus': { labelKey: 'menu.systemRoleGroupMenus', icon: Share2 },
   'system-template-generation': { labelKey: 'menu.systemTemplateGeneration', icon: Database },
+  'system-schedule-manage': { labelKey: 'menu.scheduleManage', icon: CalendarClock },
   chat: { labelKey: 'header.aiAssistant', icon: Bot },
 };
 

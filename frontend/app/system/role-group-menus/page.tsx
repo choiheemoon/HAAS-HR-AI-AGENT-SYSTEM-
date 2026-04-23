@@ -91,6 +91,7 @@ const MENU_PARENT_BY_KEY: Record<string, string> = {
   'system-user-companies': 'system',
   'system-role-groups': 'system',
   'system-role-group-menus': 'system',
+  'system-schedule-manage': 'system',
   'system-template-generation': 'system',
 };
 

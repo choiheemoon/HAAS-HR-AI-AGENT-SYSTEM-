@@ -45,6 +45,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Timer,
+  CalendarClock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/contexts/I18nContext';
@@ -153,6 +154,13 @@ const menuItems = [
     tab: 'system',
     subMenus: systemSubMenus,
   },
+  {
+    href: '/schedule/manage',
+    labelKey: 'menu.scheduleManage',
+    icon: CalendarClock,
+    tab: 'system-schedule-manage',
+    subMenus: null,
+  },
 ];
 
 function SidebarContent() {
@@ -207,7 +215,9 @@ function SidebarContent() {
 
   const visibleMenuItems = useMemo(() => {
     const canSys = userHasElevatedAccess(sessionUser);
-    const base = canSys ? menuItems : menuItems.filter((item) => item.tab !== 'system');
+    const base = canSys
+      ? menuItems
+      : menuItems.filter((item) => item.tab !== 'system' && item.tab !== 'system-schedule-manage');
 
     const out: MenuItemType[] = [];
     for (const item of base) {
