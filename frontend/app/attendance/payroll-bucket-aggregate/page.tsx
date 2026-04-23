@@ -76,6 +76,11 @@ export default function AttendancePayrollBucketAggregatePage() {
   const [error, setError] = useState('');
   /** 집계 완료 안내(행 데이터는 화면에 표시하지 않음) */
   const [computeDoneCount, setComputeDoneCount] = useState<number | null>(null);
+  const [aggregateProgress, setAggregateProgress] = useState<{
+    done: number;
+    total: number;
+    percent: number;
+  } | null>(null);
 
   useEffect(() => {
     void apiClient
@@ -143,6 +148,7 @@ export default function AttendancePayrollBucketAggregatePage() {
   const runCompute = useCallback(async () => {
     setError('');
     setComputeDoneCount(null);
+    setAggregateProgress(null);
     if (!Number.isFinite(cid)) {
       setError(t('attendancePayrollBucket.errorSelectCompany'));
       return;
@@ -157,26 +163,31 @@ export default function AttendancePayrollBucketAggregatePage() {
     }
     setRunning(true);
     try {
-      const { data } = await apiClient.computePayrollBucket({
-        company_id: cid,
-        calendar_year: calendarYear,
-        calendar_month: calendarMonth,
-        period_label: periodLabel,
-        coverage,
-        employee_code_from: coverage === 'code_range' ? employeeCodeFrom || undefined : undefined,
-        employee_code_to: coverage === 'code_range' ? employeeCodeTo || undefined : undefined,
-        department_code: coverage === 'department' ? departmentCode || undefined : undefined,
-      });
-      const payload = data as { employee_count?: number };
-      setComputeDoneCount(Number(payload.employee_count ?? 0));
+      const result = await apiClient.computePayrollBucketStream(
+        {
+          company_id: cid,
+          calendar_year: calendarYear,
+          calendar_month: calendarMonth,
+          period_label: periodLabel,
+          coverage,
+          employee_code_from: coverage === 'code_range' ? employeeCodeFrom || undefined : undefined,
+          employee_code_to: coverage === 'code_range' ? employeeCodeTo || undefined : undefined,
+          department_code: coverage === 'department' ? departmentCode || undefined : undefined,
+        },
+        (p) => setAggregateProgress(p)
+      );
+      setComputeDoneCount(Number(result.employee_count ?? 0));
     } catch (e: unknown) {
       const msg =
-        typeof e === 'object' && e !== null && 'response' in e
-          ? String((e as { response?: { data?: { detail?: string } } }).response?.data?.detail || '')
-          : '';
+        e instanceof Error
+          ? e.message
+          : typeof e === 'object' && e !== null && 'response' in e
+            ? String((e as { response?: { data?: { detail?: string } } }).response?.data?.detail || '')
+            : '';
       setError(msg || t('attendancePayrollBucket.errorCompute'));
     } finally {
       setRunning(false);
+      setAggregateProgress(null);
     }
   }, [
     calendarMonth,
@@ -437,12 +448,33 @@ export default function AttendancePayrollBucketAggregatePage() {
 
           {error ? <div className="text-sm text-red-600">{error}</div> : null}
 
+          {aggregateProgress && aggregateProgress.total > 0 ? (
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+              <div className="flex items-center justify-between text-xs text-slate-700 mb-2">
+                <span className="font-medium text-slate-800">{t('attendancePayrollBucket.progressLabel')}</span>
+                <span className="tabular-nums text-slate-600">
+                  {t('attendancePayrollBucket.progressDetail')
+                    .replace('{pct}', String(aggregateProgress.percent))
+                    .replace('{done}', String(aggregateProgress.done))
+                    .replace('{total}', String(aggregateProgress.total))}
+                </span>
+              </div>
+              <div className="h-2.5 w-full rounded-full bg-white/80 border border-indigo-100 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-indigo-600 transition-[width] duration-150 ease-out"
+                  style={{ width: `${Math.min(100, Math.max(0, aggregateProgress.percent))}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap gap-2 justify-end">
             <button
               type="button"
               onClick={() => {
                 setComputeDoneCount(null);
                 setError('');
+                setAggregateProgress(null);
               }}
               className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >

@@ -16,17 +16,12 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy import text
-from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.base import Base
 
 
 class AttendanceTimeDay(Base):
-    """
-    직원·근무일 단위 1행. 첨부 스키마의 핵심 필드는 컬럼으로 두고,
-    나머지(다수의 Leavel/OTH 세부 등)는 extra_json에 병합 저장 가능.
-    """
+    """직원·근무일 단위 1행. 휴가·결석·수당·집계 메타·agg_* 분해는 전부 명시 컬럼으로 저장."""
 
     __tablename__ = "attendance_time_day"
     __table_args__ = (
@@ -92,7 +87,36 @@ class AttendanceTimeDay(Base):
     without_pay_public_holiday = Column(Boolean, nullable=False, default=False)
     day_off = Column(Boolean, nullable=False, default=False)
 
-    extra_json = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # 과거 extra_json 에 있던 필드 — 컬럼화(대용량 JSONB 제거)
+    fuel_allowance = Column(Float, nullable=True)
+    standing_allowance = Column(Float, nullable=True)
+    other_allowance = Column(Float, nullable=True)
+    leave_time = Column(Integer, nullable=True)
+    leave_without_pay = Column(Integer, nullable=True)
+    leave_days = Column(Float, nullable=True)
+    leave_without_pay_days = Column(Float, nullable=True)
+    absent_time = Column(Integer, nullable=True)
+    absent_days = Column(Float, nullable=True)
+    work_day_count = Column(String(32), nullable=True)
+
+    agg_punch_oth1 = Column(Integer, nullable=True)
+    agg_punch_oth2 = Column(Integer, nullable=True)
+    agg_punch_oth3 = Column(Integer, nullable=True)
+    agg_punch_oth4 = Column(Integer, nullable=True)
+    agg_punch_oth5 = Column(Integer, nullable=True)
+    agg_punch_oth6 = Column(Integer, nullable=True)
+    agg_additional_oth1 = Column(Integer, nullable=True)
+    agg_additional_oth2 = Column(Integer, nullable=True)
+    agg_additional_oth3 = Column(Integer, nullable=True)
+    agg_additional_oth4 = Column(Integer, nullable=True)
+    agg_additional_oth5 = Column(Integer, nullable=True)
+    agg_additional_oth6 = Column(Integer, nullable=True)
+    agg_special_oth1 = Column(Integer, nullable=True)
+    agg_special_oth2 = Column(Integer, nullable=True)
+    agg_special_oth3 = Column(Integer, nullable=True)
+    agg_special_oth4 = Column(Integer, nullable=True)
+    agg_special_oth5 = Column(Integer, nullable=True)
+    agg_special_oth6 = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

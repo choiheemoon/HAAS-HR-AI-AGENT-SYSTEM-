@@ -349,6 +349,8 @@ const ko: TranslationDict = {
   'attendancePayrollBucket.warnNoPeriodRow': '선택한 연·월에 등록된 급여근태기간이 없습니다. 근태기준정보관리에서 먼저 등록하세요.',
   'attendancePayrollBucket.incomeOtOnly': '소득·OT 구간만 집계 (OT 시작~종료일만)',
   'attendancePayrollBucket.process': '집계 실행',
+  'attendancePayrollBucket.progressLabel': '집계 진행',
+  'attendancePayrollBucket.progressDetail': '{pct}% ({done}/{total})',
   'attendancePayrollBucket.clearResult': '알림 지우기',
   'attendancePayrollBucket.close': '마감',
   'attendancePayrollBucket.reopen': '마감 해제',

@@ -1,13 +1,18 @@
 """급여근태기간 기준 근태·OT·수당 집계 API."""
+import json
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.database import get_db
 from app.services.attendance_payroll_bucket_service import AttendancePayrollBucketService
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -87,6 +92,48 @@ def compute_payroll_bucket(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/payroll-bucket/compute-stream")
+def compute_payroll_bucket_stream(
+    body: PayrollBucketComputeBody,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """NDJSON 스트림: 직원 처리 진행률(`progress`) 후 `done`(employee_count·period) 또는 `error`."""
+
+    def ndjson_iter():
+        try:
+            for ev in AttendancePayrollBucketService(db).iter_compute_for_period(
+                current_user,
+                company_id=body.company_id,
+                calendar_year=body.calendar_year,
+                calendar_month=body.calendar_month,
+                period_label=body.period_label,
+                coverage=body.coverage,
+                employee_code_from=body.employee_code_from,
+                employee_code_to=body.employee_code_to,
+                department_code=body.department_code,
+                income_ot_only=body.income_ot_only,
+                employee_ids=None,
+            ):
+                yield (json.dumps(ev, ensure_ascii=False) + "\n").encode("utf-8")
+        except ValueError as e:
+            err = {"type": "error", "detail": str(e)}
+            yield (json.dumps(err, ensure_ascii=False) + "\n").encode("utf-8")
+        except Exception as e:
+            _log.exception("payroll-bucket compute-stream failed")
+            err = {"type": "error", "detail": str(e)[:2000]}
+            yield (json.dumps(err, ensure_ascii=False) + "\n").encode("utf-8")
+
+    return StreamingResponse(
+        ndjson_iter(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/payroll-bucket/yearly-status", response_model=Dict[str, Any])

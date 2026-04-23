@@ -349,6 +349,8 @@ const en: TranslationDict = {
   'attendancePayrollBucket.warnNoPeriodRow': 'No payroll attendance period for this year/month. Register it under Attendance standard first.',
   'attendancePayrollBucket.incomeOtOnly': 'Use OT window only (income/OT slice)',
   'attendancePayrollBucket.process': 'Run',
+  'attendancePayrollBucket.progressLabel': 'Aggregation progress',
+  'attendancePayrollBucket.progressDetail': '{pct}% ({done}/{total})',
   'attendancePayrollBucket.clearResult': 'Dismiss notice',
   'attendancePayrollBucket.close': 'Close period',
   'attendancePayrollBucket.reopen': 'Reopen period',

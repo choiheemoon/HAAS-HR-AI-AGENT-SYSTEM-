@@ -26,8 +26,12 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine)
         print("✅ 데이터베이스 테이블 생성 완료")
         try:
-            from app.db_schema_ensure import ensure_attendance_performance_indexes
+            from app.db_schema_ensure import (
+                ensure_attendance_performance_indexes,
+                ensure_attendance_time_day_flat_columns,
+            )
 
+            ensure_attendance_time_day_flat_columns(engine)
             ensure_attendance_performance_indexes(engine)
         except Exception as e_idx:
             print(f"⚠️ 근태 조회 성능 인덱스 보강: {str(e_idx)[:200]}")
@@ -52,8 +56,10 @@ app = FastAPI(
 # CORS: allow_credentials=True 와 allow_origins=["*"] 는 브라우저에서 동시에 불가 →
 # 프론트(3000)→API(8000) 직접 호출 시 CORS 헤더가 누락된 것처럼 보일 수 있음.
 _DEFAULT_BROWSER_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
-# e.g. frontend http://218.x.x.x:3000 and API http://218.x.x.x:8080
+# 브라우저가 http://공인IP:3000 처럼 접속할 때 Origin 허용 (프론트·API 포트가 달라도 동일 패턴)
 _CORS_IPV4_LITERAL_REGEX = r"^https?://(\d{1,3}\.){3}\d{1,3}(:\d+)?$"
+# IP가 아닌 호스트명으로 접속하는 내부 배포 (예: http://hr-server:3000)
+_CORS_HOSTNAME_LITERAL_REGEX = r"^https?://[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?(:\d+)?$"
 
 
 def _cors_middleware_args():
@@ -64,11 +70,18 @@ def _cors_middleware_args():
     fe = (settings.FRONTEND_URL or "").strip().rstrip("/")
     if fe and fe not in origins:
         origins.append(fe)
-    regex = (settings.CORS_ORIGIN_REGEX or "").strip() or _CORS_IPV4_LITERAL_REGEX
-    if origins or regex:
-        out: dict = {"allow_origins": origins, "allow_credentials": True}
-        if regex:
-            out["allow_origin_regex"] = regex
+    # CORS_ORIGIN_REGEX만 단독 설정하면 IPv4 Origin이 막히는 배포 사고가 나기 쉬움 → 기본 패턴은 항상 병합
+    custom = (settings.CORS_ORIGIN_REGEX or "").strip()
+    merged = [_CORS_IPV4_LITERAL_REGEX, _CORS_HOSTNAME_LITERAL_REGEX]
+    if custom:
+        merged.append(custom)
+    allow_origin_regex = "|".join(f"(?:{p})" for p in merged)
+    if origins or allow_origin_regex:
+        out: dict = {
+            "allow_origins": origins,
+            "allow_credentials": True,
+            "allow_origin_regex": allow_origin_regex,
+        }
         return out
     return {"allow_origins": ["*"], "allow_credentials": False}
 

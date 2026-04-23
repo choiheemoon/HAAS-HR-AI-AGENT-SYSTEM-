@@ -407,6 +407,8 @@ const th: TranslationDict = {
   'attendancePayrollBucket.warnNoPeriodRow': 'ไม่มีช่วงเงินเดือน-เข้างานสำหรับปี/เดือนนี้ ลงทะเบียนในมาสเตอร์เกณฑ์เข้างานก่อน',
   'attendancePayrollBucket.incomeOtOnly': 'ใช้เฉพาะช่วง OT (ส่วนรายได้/OT)',
   'attendancePayrollBucket.process': 'รันสรุป',
+  'attendancePayrollBucket.progressLabel': 'ความคืบหน้าการรวม',
+  'attendancePayrollBucket.progressDetail': '{pct}% ({done}/{total})',
   'attendancePayrollBucket.clearResult': 'ปิดข้อความ',
   'attendancePayrollBucket.close': 'ปิดงวด',
   'attendancePayrollBucket.reopen': 'เปิดงวดใหม่',

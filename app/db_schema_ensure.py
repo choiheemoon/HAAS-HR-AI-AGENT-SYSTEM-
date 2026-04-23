@@ -27,6 +27,30 @@ def ensure_attendance_performance_indexes(engine: Engine) -> None:
     )
 
 
+def ensure_attendance_time_day_flat_columns(engine: Engine) -> None:
+    """extra_json 제거 후 명시 컬럼 보강(create_all은 기존 테이블에 컬럼을 추가하지 않음)."""
+    if engine.dialect.name != "postgresql":
+        return
+    stmts = [
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS fuel_allowance DOUBLE PRECISION",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS standing_allowance DOUBLE PRECISION",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS other_allowance DOUBLE PRECISION",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS leave_time INTEGER",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS leave_without_pay INTEGER",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS leave_days DOUBLE PRECISION",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS leave_without_pay_days DOUBLE PRECISION",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS absent_time INTEGER",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS absent_days DOUBLE PRECISION",
+        "ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS work_day_count VARCHAR(32)",
+    ]
+    for i in range(1, 7):
+        stmts.append(f"ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS agg_punch_oth{i} INTEGER")
+        stmts.append(f"ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS agg_additional_oth{i} INTEGER")
+        stmts.append(f"ALTER TABLE attendance_time_day ADD COLUMN IF NOT EXISTS agg_special_oth{i} INTEGER")
+    for sql in stmts:
+        _run_ddl(engine, sql, "attendance_time_day flat column")
+
+
 def ensure_postgresql_auth_schema(engine: Engine) -> None:
     if engine.dialect.name != "postgresql":
         return

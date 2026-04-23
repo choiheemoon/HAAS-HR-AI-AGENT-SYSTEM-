@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -102,18 +102,6 @@ def _nz_f(v: Any) -> float:
         return float(v) if v is not None else 0.0
     except (TypeError, ValueError):
         return 0.0
-
-
-def _extra_int(ex: Any, key: str) -> int:
-    if not isinstance(ex, dict):
-        return 0
-    return _nz_int(ex.get(key))
-
-
-def _extra_f(ex: Any, key: str) -> float:
-    if not isinstance(ex, dict):
-        return 0.0
-    return _nz_f(ex.get(key))
 
 
 def _parse_iso_date(s: Any) -> Optional[date]:
@@ -539,6 +527,272 @@ class AttendancePayrollBucketService:
         self.db.execute(stmt)
         self.db.commit()
 
+    def _build_bucket_row_for_employee(
+        self,
+        emp: Employee,
+        *,
+        type_by: Dict[str, EmployeeType],
+        prow: AttendancePaymentPeriod,
+        calendar_year: int,
+        calendar_month: int,
+        pl: str,
+        income_ot_only: bool,
+        add_map: Dict[Tuple[int, date], Dict[str, int]],
+        auto_ot_eids: Set[int],
+        exclude_cal_ot_eids: Set[int],
+        holiday_keys: Set[Tuple[int, date]],
+        company_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        mp = _is_monthly_pay(emp, type_by)
+        main_s, main_e = _period_main_range(prow, mp)
+        ot_s, ot_e = _period_ot_range(prow, mp)
+        if not main_s or not main_e:
+            return None
+        if income_ot_only:
+            filt_s, filt_e = ot_s or main_s, ot_e or main_e
+        else:
+            filt_s, filt_e = main_s, main_e
+        if not filt_s or not filt_e:
+            return None
+
+        q = self.db.query(AttendanceTimeDay).filter(
+            AttendanceTimeDay.employee_id == emp.id,
+            AttendanceTimeDay.work_day >= filt_s,
+            AttendanceTimeDay.work_day <= filt_e,
+        )
+        day_rows = q.all()
+
+        sums: Dict[str, Any] = defaultdict(float)
+        holiday_days = 0
+        days_with_in = 0
+        for dr in day_rows:
+            wd = dr.work_day
+            eid = int(dr.employee_id)
+            add_sub = add_map.get((eid, wd), {}) if wd else {}
+            if eid not in auto_ot_eids:
+                add_sub = {}
+            elif eid in exclude_cal_ot_eids and bool(getattr(dr, "day_off", False)):
+                add_sub = {}
+            is_hol_ot = bool(wd) and _is_holiday_ot_day(company_id, wd, dr, holiday_keys)
+
+            if dr.day_off:
+                holiday_days += 1
+            if dr.time_in:
+                days_with_in += 1
+                late = _nz_int(dr.late_time_in)
+                early = _nz_int(dr.before_time_out)
+                sums["working_minutes"] += max(0, 480 - late - early)
+
+            sums["late_minutes"] += _nz_int(dr.late_time_in)
+            sums["early_minutes"] += _nz_int(dr.before_time_out)
+            sums["leave_with_pay_minutes"] += _nz_int(getattr(dr, "leave_time", None))
+            sums["leave_without_pay_minutes"] += _nz_int(getattr(dr, "leave_without_pay", None))
+            sums["absent_minutes"] += _nz_int(getattr(dr, "absent_time", None))
+
+            for i in range(1, 7):
+                k = f"oth{i}"
+                base = _nz_int(getattr(dr, k, None))
+                total_m = base + _nz_int(add_sub.get(k, 0))
+                sums[k] += total_m
+                wk_key = f"{k}_weekday"
+                hol_key = f"{k}_holiday"
+                if is_hol_ot:
+                    sums[hol_key] += total_m
+                else:
+                    sums[wk_key] += total_m
+
+            v_othb = _nz_f(dr.othb)
+            sums["othb"] += v_othb
+            if is_hol_ot:
+                sums["othb_holiday"] += v_othb
+            else:
+                sums["othb_weekday"] += v_othb
+            sums["shift_allowance"] += _nz_f(dr.shift_allowance)
+            sums["food_allowance"] += _nz_f(dr.food_allowance)
+            sums["special_allowance"] += _nz_f(dr.special_allowance)
+            sums["shift_ot_allowance"] += _nz_f(dr.shift_ot_allowance)
+            sums["shift_over_ot_allowance"] += _nz_f(dr.shift_over_ot_allowance)
+            sums["food_ot_allowance"] += _nz_f(dr.food_ot_allowance)
+            sums["food_over_ot_allowance"] += _nz_f(dr.food_over_ot_allowance)
+            sums["special_ot_allowance"] += _nz_f(dr.special_ot_allowance)
+            v_otloc = _nz_f(dr.overtime_pay_local)
+            sums["overtime_pay_local"] += v_otloc
+            if is_hol_ot:
+                sums["overtime_pay_local_holiday"] += v_otloc
+            else:
+                sums["overtime_pay_local_weekday"] += v_otloc
+            sums["fuel_allowance"] += _nz_f(getattr(dr, "fuel_allowance", None))
+            sums["standing_allowance"] += _nz_f(getattr(dr, "standing_allowance", None))
+            sums["other_allowance"] += _nz_f(getattr(dr, "other_allowance", None))
+
+        return {
+            "employee_id": int(emp.id),
+            "employee_number": emp.employee_number or "",
+            "employee_name": emp.name or "",
+            "department": (emp.department or "").strip(),
+            "pay_type": "monthly" if mp else "daily",
+            "calendar_year": int(calendar_year),
+            "calendar_month": int(calendar_month),
+            "period_label": pl,
+            "range_main_start": main_s.isoformat(),
+            "range_main_end": main_e.isoformat(),
+            "range_ot_start": (ot_s or main_s).isoformat(),
+            "range_ot_end": (ot_e or main_e).isoformat(),
+            "income_ot_only": bool(income_ot_only),
+            "holiday_days": holiday_days,
+            "days_worked": days_with_in,
+            "working_minutes": int(sums["working_minutes"]),
+            "absent_minutes": int(sums["absent_minutes"]),
+            "late_minutes": int(sums["late_minutes"]),
+            "early_minutes": int(sums["early_minutes"]),
+            "leave_with_pay_minutes": int(sums["leave_with_pay_minutes"]),
+            "leave_without_pay_minutes": int(sums["leave_without_pay_minutes"]),
+            "oth1": int(sums["oth1"]),
+            "oth2": int(sums["oth2"]),
+            "oth3": int(sums["oth3"]),
+            "oth4": int(sums["oth4"]),
+            "oth5": int(sums["oth5"]),
+            "oth6": int(sums["oth6"]),
+            "oth1_weekday": int(sums["oth1_weekday"]),
+            "oth1_holiday": int(sums["oth1_holiday"]),
+            "oth2_weekday": int(sums["oth2_weekday"]),
+            "oth2_holiday": int(sums["oth2_holiday"]),
+            "oth3_weekday": int(sums["oth3_weekday"]),
+            "oth3_holiday": int(sums["oth3_holiday"]),
+            "oth4_weekday": int(sums["oth4_weekday"]),
+            "oth4_holiday": int(sums["oth4_holiday"]),
+            "oth5_weekday": int(sums["oth5_weekday"]),
+            "oth5_holiday": int(sums["oth5_holiday"]),
+            "oth6_weekday": int(sums["oth6_weekday"]),
+            "oth6_holiday": int(sums["oth6_holiday"]),
+            "othb": round(float(sums["othb"]), 2),
+            "othb_weekday": round(float(sums["othb_weekday"]), 2),
+            "othb_holiday": round(float(sums["othb_holiday"]), 2),
+            "shift_allowance": round(float(sums["shift_allowance"]), 2),
+            "food_allowance": round(float(sums["food_allowance"]), 2),
+            "special_allowance": round(float(sums["special_allowance"]), 2),
+            "fuel_allowance": round(float(sums["fuel_allowance"]), 2),
+            "standing_allowance": round(float(sums["standing_allowance"]), 2),
+            "other_allowance": round(float(sums["other_allowance"]), 2),
+            "shift_ot_allowance": round(float(sums["shift_ot_allowance"]), 2),
+            "shift_over_ot_allowance": round(float(sums["shift_over_ot_allowance"]), 2),
+            "food_ot_allowance": round(float(sums["food_ot_allowance"]), 2),
+            "food_over_ot_allowance": round(float(sums["food_over_ot_allowance"]), 2),
+            "special_ot_allowance": round(float(sums["special_ot_allowance"]), 2),
+            "overtime_pay_local": round(float(sums["overtime_pay_local"]), 2),
+            "overtime_pay_local_weekday": round(float(sums["overtime_pay_local_weekday"]), 2),
+            "overtime_pay_local_holiday": round(float(sums["overtime_pay_local_holiday"]), 2),
+        }
+
+    def iter_compute_for_period(
+        self,
+        user: User,
+        company_id: int,
+        calendar_year: int,
+        calendar_month: int,
+        period_label: str,
+        coverage: str = "all",
+        employee_code_from: Optional[str] = None,
+        employee_code_to: Optional[str] = None,
+        department_code: Optional[str] = None,
+        income_ot_only: bool = False,
+        employee_ids: Optional[List[int]] = None,
+    ) -> Iterator[Dict[str, Any]]:
+        """NDJSON 스트림용: 직원 단위 progress 후 마지막에 done."""
+        allowed = self._accessible_company_ids(user)
+        if not allowed or company_id not in allowed:
+            raise ValueError("회사에 대한 접근 권한이 없습니다.")
+        pl = (period_label or "Period 1").strip() or "Period 1"
+        prow = (
+            self.db.query(AttendancePaymentPeriod)
+            .filter(
+                AttendancePaymentPeriod.company_id == company_id,
+                AttendancePaymentPeriod.calendar_year == int(calendar_year),
+                AttendancePaymentPeriod.calendar_month == int(calendar_month),
+                AttendancePaymentPeriod.period_label == pl,
+            )
+            .first()
+        )
+        if not prow:
+            raise ValueError(
+                f"급여근태기간을 찾을 수 없습니다. ({calendar_year}-{calendar_month:02d}, {pl}) 근태기준정보에서 등록하세요."
+            )
+        if bool(getattr(prow, "is_closed", False)):
+            raise ValueError("해당 기간은 급여정보 집계 마감 상태입니다. 마감 해제 후 실행하세요.")
+
+        type_by = self._type_by_code(company_id)
+        employees = self._filter_employees(
+            company_id, allowed, coverage, employee_code_from, employee_code_to, department_code, employee_ids
+        )
+        if not employees:
+            yield {
+                "type": "done",
+                "result": {
+                    "period": self._period_meta(prow),
+                    "employee_count": 0,
+                },
+            }
+            return
+
+        emp_ids = [int(e.id) for e in employees]
+        union_from: Optional[date] = None
+        union_to: Optional[date] = None
+        for e in employees:
+            mp = _is_monthly_pay(e, type_by)
+            s, t = _period_main_range(prow, mp)
+            u, v = _period_ot_range(prow, mp)
+            for a, b in ((s, t), (u, v)):
+                if a and b:
+                    if union_from is None or a < union_from:
+                        union_from = a
+                    if union_to is None or b > union_to:
+                        union_to = b
+        if union_from is None or union_to is None:
+            raise ValueError("급여근태기간에 유효한 시작·종료일이 없습니다.")
+        add_map = self._load_additional_ot_map(emp_ids, union_from, union_to, allowed)
+        auto_ot_eids = _employee_ids_auto_ot_generation_enabled(self.db, emp_ids)
+        exclude_cal_ot_eids = _employee_ids_auto_ot_exclude_calendar_holidays(self.db, emp_ids)
+        holiday_keys = _company_holiday_key_set(self.db, company_id, union_from, union_to)
+
+        rows_out: List[Dict[str, Any]] = []
+        n = len(employees)
+        try:
+            for i, emp in enumerate(employees):
+                row = self._build_bucket_row_for_employee(
+                    emp,
+                    type_by=type_by,
+                    prow=prow,
+                    calendar_year=calendar_year,
+                    calendar_month=calendar_month,
+                    pl=pl,
+                    income_ot_only=income_ot_only,
+                    add_map=add_map,
+                    auto_ot_eids=auto_ot_eids,
+                    exclude_cal_ot_eids=exclude_cal_ot_eids,
+                    holiday_keys=holiday_keys,
+                    company_id=company_id,
+                )
+                if row:
+                    rows_out.append(row)
+                yield {
+                    "type": "progress",
+                    "done": i + 1,
+                    "total": n,
+                    "percent": int(100 * (i + 1) / n) if n else 100,
+                }
+            self._upsert_aggregate_rows(company_id, prow, rows_out, getattr(user, "id", None))
+        except Exception:
+            self.db.rollback()
+            raise
+
+        yield {
+            "type": "done",
+            "result": {
+                "period": self._period_meta(prow),
+                "employee_count": len(rows_out),
+            },
+        }
+
     def compute_for_period(
         self,
         user: User,
@@ -609,149 +863,22 @@ class AttendancePayrollBucketService:
 
         rows_out: List[Dict[str, Any]] = []
         for emp in employees:
-            mp = _is_monthly_pay(emp, type_by)
-            main_s, main_e = _period_main_range(prow, mp)
-            ot_s, ot_e = _period_ot_range(prow, mp)
-            if not main_s or not main_e:
-                continue
-            if income_ot_only:
-                filt_s, filt_e = ot_s or main_s, ot_e or main_e
-            else:
-                filt_s, filt_e = main_s, main_e
-            if not filt_s or not filt_e:
-                continue
-
-            q = self.db.query(AttendanceTimeDay).filter(
-                AttendanceTimeDay.employee_id == emp.id,
-                AttendanceTimeDay.work_day >= filt_s,
-                AttendanceTimeDay.work_day <= filt_e,
+            row = self._build_bucket_row_for_employee(
+                emp,
+                type_by=type_by,
+                prow=prow,
+                calendar_year=calendar_year,
+                calendar_month=calendar_month,
+                pl=pl,
+                income_ot_only=income_ot_only,
+                add_map=add_map,
+                auto_ot_eids=auto_ot_eids,
+                exclude_cal_ot_eids=exclude_cal_ot_eids,
+                holiday_keys=holiday_keys,
+                company_id=company_id,
             )
-            day_rows = q.all()
-
-            sums: Dict[str, Any] = defaultdict(float)
-            holiday_days = 0
-            days_with_in = 0
-            for dr in day_rows:
-                ex = dr.extra_json if isinstance(dr.extra_json, dict) else {}
-                wd = dr.work_day
-                eid = int(dr.employee_id)
-                add_sub = add_map.get((eid, wd), {}) if wd else {}
-                if eid not in auto_ot_eids:
-                    add_sub = {}
-                elif eid in exclude_cal_ot_eids and bool(getattr(dr, "day_off", False)):
-                    add_sub = {}
-                is_hol_ot = bool(wd) and _is_holiday_ot_day(company_id, wd, dr, holiday_keys)
-
-                if dr.day_off:
-                    holiday_days += 1
-                if dr.time_in:
-                    days_with_in += 1
-                    late = _nz_int(dr.late_time_in)
-                    early = _nz_int(dr.before_time_out)
-                    sums["working_minutes"] += max(0, 480 - late - early)
-
-                sums["late_minutes"] += _nz_int(dr.late_time_in)
-                sums["early_minutes"] += _nz_int(dr.before_time_out)
-                sums["leave_with_pay_minutes"] += _extra_int(ex, "leave_time")
-                sums["leave_without_pay_minutes"] += _extra_int(ex, "leave_without_pay")
-                sums["absent_minutes"] += _extra_int(ex, "absent_time")
-
-                for i in range(1, 7):
-                    k = f"oth{i}"
-                    base = _nz_int(getattr(dr, k, None))
-                    total_m = base + _nz_int(add_sub.get(k, 0))
-                    sums[k] += total_m
-                    wk_key = f"{k}_weekday"
-                    hol_key = f"{k}_holiday"
-                    if is_hol_ot:
-                        sums[hol_key] += total_m
-                    else:
-                        sums[wk_key] += total_m
-
-                v_othb = _nz_f(dr.othb)
-                sums["othb"] += v_othb
-                if is_hol_ot:
-                    sums["othb_holiday"] += v_othb
-                else:
-                    sums["othb_weekday"] += v_othb
-                sums["shift_allowance"] += _nz_f(dr.shift_allowance)
-                sums["food_allowance"] += _nz_f(dr.food_allowance)
-                sums["special_allowance"] += _nz_f(dr.special_allowance)
-                sums["shift_ot_allowance"] += _nz_f(dr.shift_ot_allowance)
-                sums["shift_over_ot_allowance"] += _nz_f(dr.shift_over_ot_allowance)
-                sums["food_ot_allowance"] += _nz_f(dr.food_ot_allowance)
-                sums["food_over_ot_allowance"] += _nz_f(dr.food_over_ot_allowance)
-                sums["special_ot_allowance"] += _nz_f(dr.special_ot_allowance)
-                v_otloc = _nz_f(dr.overtime_pay_local)
-                sums["overtime_pay_local"] += v_otloc
-                if is_hol_ot:
-                    sums["overtime_pay_local_holiday"] += v_otloc
-                else:
-                    sums["overtime_pay_local_weekday"] += v_otloc
-                sums["fuel_allowance"] += _extra_f(ex, "fuel_allowance")
-                sums["standing_allowance"] += _extra_f(ex, "standing_allowance")
-                sums["other_allowance"] += _extra_f(ex, "other_allowance")
-
-            rows_out.append(
-                {
-                    "employee_id": int(emp.id),
-                    "employee_number": emp.employee_number or "",
-                    "employee_name": emp.name or "",
-                    "department": (emp.department or "").strip(),
-                    "pay_type": "monthly" if mp else "daily",
-                    "calendar_year": int(calendar_year),
-                    "calendar_month": int(calendar_month),
-                    "period_label": pl,
-                    "range_main_start": main_s.isoformat(),
-                    "range_main_end": main_e.isoformat(),
-                    "range_ot_start": (ot_s or main_s).isoformat(),
-                    "range_ot_end": (ot_e or main_e).isoformat(),
-                    "income_ot_only": bool(income_ot_only),
-                    "holiday_days": holiday_days,
-                    "days_worked": days_with_in,
-                    "working_minutes": int(sums["working_minutes"]),
-                    "absent_minutes": int(sums["absent_minutes"]),
-                    "late_minutes": int(sums["late_minutes"]),
-                    "early_minutes": int(sums["early_minutes"]),
-                    "leave_with_pay_minutes": int(sums["leave_with_pay_minutes"]),
-                    "leave_without_pay_minutes": int(sums["leave_without_pay_minutes"]),
-                    "oth1": int(sums["oth1"]),
-                    "oth2": int(sums["oth2"]),
-                    "oth3": int(sums["oth3"]),
-                    "oth4": int(sums["oth4"]),
-                    "oth5": int(sums["oth5"]),
-                    "oth6": int(sums["oth6"]),
-                    "oth1_weekday": int(sums["oth1_weekday"]),
-                    "oth1_holiday": int(sums["oth1_holiday"]),
-                    "oth2_weekday": int(sums["oth2_weekday"]),
-                    "oth2_holiday": int(sums["oth2_holiday"]),
-                    "oth3_weekday": int(sums["oth3_weekday"]),
-                    "oth3_holiday": int(sums["oth3_holiday"]),
-                    "oth4_weekday": int(sums["oth4_weekday"]),
-                    "oth4_holiday": int(sums["oth4_holiday"]),
-                    "oth5_weekday": int(sums["oth5_weekday"]),
-                    "oth5_holiday": int(sums["oth5_holiday"]),
-                    "oth6_weekday": int(sums["oth6_weekday"]),
-                    "oth6_holiday": int(sums["oth6_holiday"]),
-                    "othb": round(float(sums["othb"]), 2),
-                    "othb_weekday": round(float(sums["othb_weekday"]), 2),
-                    "othb_holiday": round(float(sums["othb_holiday"]), 2),
-                    "shift_allowance": round(float(sums["shift_allowance"]), 2),
-                    "food_allowance": round(float(sums["food_allowance"]), 2),
-                    "special_allowance": round(float(sums["special_allowance"]), 2),
-                    "fuel_allowance": round(float(sums["fuel_allowance"]), 2),
-                    "standing_allowance": round(float(sums["standing_allowance"]), 2),
-                    "other_allowance": round(float(sums["other_allowance"]), 2),
-                    "shift_ot_allowance": round(float(sums["shift_ot_allowance"]), 2),
-                    "shift_over_ot_allowance": round(float(sums["shift_over_ot_allowance"]), 2),
-                    "food_ot_allowance": round(float(sums["food_ot_allowance"]), 2),
-                    "food_over_ot_allowance": round(float(sums["food_over_ot_allowance"]), 2),
-                    "special_ot_allowance": round(float(sums["special_ot_allowance"]), 2),
-                    "overtime_pay_local": round(float(sums["overtime_pay_local"]), 2),
-                    "overtime_pay_local_weekday": round(float(sums["overtime_pay_local_weekday"]), 2),
-                    "overtime_pay_local_holiday": round(float(sums["overtime_pay_local_holiday"]), 2),
-                }
-            )
+            if row:
+                rows_out.append(row)
 
         self._upsert_aggregate_rows(company_id, prow, rows_out, getattr(user, "id", None))
 

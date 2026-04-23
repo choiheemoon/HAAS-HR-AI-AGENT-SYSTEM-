@@ -7,8 +7,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Load, Session, aliased
-from sqlalchemy.types import Float as SAFloat
-
 from app.models.attendance_additional_ot import AttendanceAdditionalOt
 from app.models.attendance_time_day import AttendanceTimeDay
 from app.models.company import Company
@@ -78,6 +76,20 @@ def _bool(v: Any, default: bool = False) -> bool:
     return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
+_OTH_KEYS: Tuple[str, ...] = ("oth1", "oth2", "oth3", "oth4", "oth5", "oth6")
+
+
+def _agg_oth_field_names(prefix: str) -> Tuple[str, ...]:
+    return tuple(f"{prefix}_oth{i}" for i in range(1, 7))
+
+
+_AGG_OTH_FIELDS: Tuple[str, ...] = (
+    *_agg_oth_field_names("agg_punch"),
+    *_agg_oth_field_names("agg_additional"),
+    *_agg_oth_field_names("agg_special"),
+)
+
+
 NUM_INT_FIELDS = {
     "row_no",
     "late_time_in",
@@ -89,9 +101,19 @@ NUM_INT_FIELDS = {
     "oth4",
     "oth5",
     "oth6",
+    "leave_time",
+    "leave_without_pay",
+    "absent_time",
+    *_AGG_OTH_FIELDS,
 }
 NUM_FLOAT_FIELDS = {
     "othb",
+    "fuel_allowance",
+    "standing_allowance",
+    "other_allowance",
+    "leave_days",
+    "leave_without_pay_days",
+    "absent_days",
     "day_food",
     "day_wages",
     "day_food_ot",
@@ -122,9 +144,8 @@ TEXT_FIELDS = {
     "st_out",
     "st_bin",
     "st_bout",
+    "work_day_count",
 }
-
-_OTH_KEYS: Tuple[str, ...] = ("oth1", "oth2", "oth3", "oth4", "oth5", "oth6")
 
 
 def _additional_ot_approve_included(approve_status: Optional[str]) -> bool:
@@ -233,11 +254,19 @@ def _row_to_dict(r: AttendanceTimeDay) -> Dict[str, Any]:
         "doc_sick": bool(r.doc_sick),
         "without_pay_public_holiday": bool(r.without_pay_public_holiday),
         "day_off": bool(r.day_off),
+        "fuel_allowance": r.fuel_allowance,
+        "standing_allowance": r.standing_allowance,
+        "other_allowance": r.other_allowance,
+        "leave_time": r.leave_time,
+        "leave_without_pay": r.leave_without_pay,
+        "leave_days": r.leave_days,
+        "leave_without_pay_days": r.leave_without_pay_days,
+        "absent_time": r.absent_time,
+        "absent_days": r.absent_days,
+        "work_day_count": r.work_day_count,
     }
-    if isinstance(r.extra_json, dict):
-        for k, v in r.extra_json.items():
-            if k not in out:
-                out[k] = v
+    for fn in _AGG_OTH_FIELDS:
+        out[fn] = getattr(r, fn, None)
     return out
 
 
@@ -376,15 +405,12 @@ class AttendanceTimeDayService:
             elif k in BOOL_FIELDS:
                 setattr(r, k, _bool(v, default=False))
             elif k in TEXT_FIELDS:
-                max_len = 2000 if k in ("day_memo", "note") else (2 if k == "no_of_shift" else 200)
+                max_len = (
+                    2000
+                    if k in ("day_memo", "note")
+                    else (32 if k == "work_day_count" else (2 if k == "no_of_shift" else 200))
+                )
                 setattr(r, k, _str(v, max_len))
-        keep = NUM_INT_FIELDS | NUM_FLOAT_FIELDS | DATETIME_FIELDS | BOOL_FIELDS | TEXT_FIELDS | {"work_day"}
-        extra = dict(r.extra_json) if isinstance(r.extra_json, dict) else {}
-        for k, v in body.items():
-            if k in keep or k in {"id", "employee_id"}:
-                continue
-            extra[k] = v
-        r.extra_json = extra
         if "user_chang" not in body:
             r.user_chang = _str(getattr(user, "username", None) or str(user.id), 200)
         r.updated_at = datetime.utcnow()
@@ -500,10 +526,10 @@ class AttendanceTimeDayService:
                 "timeOut": cast(AttendanceTimeDay.time_out, String),
                 "late": cast(AttendanceTimeDay.late_time_in, String),
                 "early": cast(AttendanceTimeDay.before_time_out, String),
-                "leaveMin": cast(AttendanceTimeDay.extra_json["leave_time"].astext, String),
-                "leaveWithoutPay": cast(AttendanceTimeDay.extra_json["leave_without_pay"].astext, String),
-                "absentMin": cast(AttendanceTimeDay.extra_json["absent_time"].astext, String),
-                "workDayFrac": cast(AttendanceTimeDay.extra_json["work_day_count"].astext, String),
+                "leaveMin": cast(AttendanceTimeDay.leave_time, String),
+                "leaveWithoutPay": cast(AttendanceTimeDay.leave_without_pay, String),
+                "absentMin": cast(AttendanceTimeDay.absent_time, String),
+                "workDayFrac": cast(AttendanceTimeDay.work_day_count, String),
                 "oth1": cast(AttendanceTimeDay.oth1, String),
                 "oth2": cast(AttendanceTimeDay.oth2, String),
                 "oth3": cast(AttendanceTimeDay.oth3, String),
@@ -636,10 +662,10 @@ class AttendanceTimeDayService:
                 "timeOut": cast(AttendanceTimeDay.time_out, String),
                 "late": cast(AttendanceTimeDay.late_time_in, String),
                 "early": cast(AttendanceTimeDay.before_time_out, String),
-                "leaveMin": cast(AttendanceTimeDay.extra_json["leave_time"].astext, String),
-                "leaveWithoutPay": cast(AttendanceTimeDay.extra_json["leave_without_pay"].astext, String),
-                "absentMin": cast(AttendanceTimeDay.extra_json["absent_time"].astext, String),
-                "workDayFrac": cast(AttendanceTimeDay.extra_json["work_day_count"].astext, String),
+                "leaveMin": cast(AttendanceTimeDay.leave_time, String),
+                "leaveWithoutPay": cast(AttendanceTimeDay.leave_without_pay, String),
+                "absentMin": cast(AttendanceTimeDay.absent_time, String),
+                "workDayFrac": cast(AttendanceTimeDay.work_day_count, String),
                 "oth1": cast(AttendanceTimeDay.oth1, String),
                 "oth2": cast(AttendanceTimeDay.oth2, String),
                 "oth3": cast(AttendanceTimeDay.oth3, String),
@@ -718,11 +744,6 @@ class AttendanceTimeDayService:
         def _sum_int(col):
             return func.sum(func.coalesce(col, 0))
 
-        ej = AttendanceTimeDay.extra_json
-        fuel_x = cast(ej["fuel_allowance"].astext, SAFloat)
-        stand_x = cast(ej["standing_allowance"].astext, SAFloat)
-        other_x = cast(ej["other_allowance"].astext, SAFloat)
-
         sum_entities = (
             _sum_int(AttendanceTimeDay.oth1),
             _sum_int(AttendanceTimeDay.oth2),
@@ -745,9 +766,9 @@ class AttendanceTimeDayService:
             _sum_float(AttendanceTimeDay.day_wages),
             _sum_float(AttendanceTimeDay.day_food_ot),
             _sum_float(AttendanceTimeDay.day_wages_ot),
-            func.sum(func.coalesce(fuel_x, 0.0)),
-            func.sum(func.coalesce(stand_x, 0.0)),
-            func.sum(func.coalesce(other_x, 0.0)),
+            _sum_float(AttendanceTimeDay.fuel_allowance),
+            _sum_float(AttendanceTimeDay.standing_allowance),
+            _sum_float(AttendanceTimeDay.other_allowance),
         )
 
         q_cnt = self._scope_time_day_rows_for_report(

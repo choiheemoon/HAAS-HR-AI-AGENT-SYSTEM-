@@ -638,11 +638,11 @@ def _collect_auto_ot_day_buckets(
 
 def _extract_prev_applied(row: Optional[AttendanceTimeDay], prefix: str) -> List[int]:
     out = [0, 0, 0, 0, 0, 0]
-    if not row or not isinstance(row.extra_json, dict):
+    if not row:
         return out
     for i in range(6):
         key = f"{prefix}_oth{i + 1}"
-        out[i] = _int_nonneg(row.extra_json.get(key))
+        out[i] = _int_nonneg(getattr(row, key, None))
     return out
 
 

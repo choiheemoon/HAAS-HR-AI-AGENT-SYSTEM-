@@ -1,5 +1,6 @@
 """일별 근태 집계 결과 조회/수정 API (근태현황관리)."""
 import json
+import logging
 from datetime import date
 from typing import Any, Dict, List, Optional, Set
 
@@ -13,6 +14,7 @@ from app.services.attendance_aggregate_service import AttendanceAggregateService
 from app.services.attendance_time_day_service import AttendanceTimeDayService
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
 
 
 def _pd(v: Optional[str]) -> Optional[date]:
@@ -285,6 +287,10 @@ def run_time_day_aggregate_stream(
                 yield (json.dumps(ev, ensure_ascii=False) + "\n").encode("utf-8")
         except ValueError as e:
             err = {"type": "error", "detail": str(e)}
+            yield (json.dumps(err, ensure_ascii=False) + "\n").encode("utf-8")
+        except Exception as e:
+            _log.exception("time-day aggregate-stream failed")
+            err = {"type": "error", "detail": str(e)[:2000]}
             yield (json.dumps(err, ensure_ascii=False) + "\n").encode("utf-8")
 
     return StreamingResponse(

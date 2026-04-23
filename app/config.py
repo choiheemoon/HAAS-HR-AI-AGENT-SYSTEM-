@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # CORS: 쉼표로 구분한 오리진 목록 (예: http://218.151.134.47:3000,http://localhost:3000).
     # 비우면 main.py가 localhost + IPv4 주소 Origin 패턴을 사용합니다 (JWT는 Authorization 헤더로 동작).
     CORS_ORIGINS: Optional[str] = None
-    # Optional: overrides default IPv4 literal regex in main.py CORS.
+    # Optional: 추가 Origin 정규식 (main.py에서 IPv4·호스트명 기본 패턴과 OR 병합).
     CORS_ORIGIN_REGEX: Optional[str] = None
 
     # Storage
