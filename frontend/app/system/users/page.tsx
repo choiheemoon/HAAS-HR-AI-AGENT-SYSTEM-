@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
 import { Filter, ChevronDown } from 'lucide-react';
 import { isValid, parseISO } from 'date-fns';
+import { ColumnFilterPopover } from '@/components/ui/ColumnFilterPopover';
 import { apiClient } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
 import { cn } from '@/lib/utils';
@@ -247,6 +248,35 @@ export default function SystemUsersPage() {
     return map;
   }, [users, groups, dateLocale, t]);
 
+  const valueCountsByKey = useMemo(() => {
+    const map: Record<string, Record<string, number>> = {};
+    USER_COLUMN_KEYS.forEach((key) => {
+      map[key] = {};
+      users.forEach((row) => {
+        const v = getUserRowDisplayValues(row, groups, dateLocale, t);
+        const val = String(v[key] ?? '—').trim();
+        if (!val) return;
+        map[key][val] = (map[key][val] ?? 0) + 1;
+      });
+    });
+    return map;
+  }, [users, groups, dateLocale, t]);
+
+  const columnFilterLabels = useMemo(
+    () => ({
+      title: t('appList.filter.title'),
+      reset: t('common.reset'),
+      noValues: t('appList.filter.noValues'),
+      noMatchingValues: t('appList.filter.noMatchingValues'),
+      valueSearchPlaceholder: t('appList.filter.valueSearchPlaceholder'),
+      selectAll: t('appList.table.selectAll'),
+      deselectAll: t('appList.filter.deselectAll'),
+      emptyValue: t('common.emptyValue'),
+      selectedCountTemplate: t('appList.filter.selectedCount'),
+    }),
+    [t]
+  );
+
   const totalFiltered = filteredUsers.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
   const startItem = totalFiltered === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -260,20 +290,6 @@ export default function SystemUsersPage() {
     () => filteredUsers.slice((page - 1) * pageSize, page * pageSize),
     [filteredUsers, page, pageSize]
   );
-
-  const toggleColumnFilter = (key: string, value: string) => {
-    setColumnFilters((prev) => {
-      const arr = prev[key] ?? [];
-      const next = arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
-      if (next.length === 0) {
-        const u = { ...prev };
-        delete u[key];
-        return u;
-      }
-      return { ...prev, [key]: next };
-    });
-    setPage(1);
-  };
 
   const clearColumnFilter = (key: string) => {
     setColumnFilters((prev) => {
@@ -542,57 +558,27 @@ export default function SystemUsersPage() {
                                   <ChevronDown className="w-4 h-4" />
                                 </button>
                                 {openFilterKey === key && (
-                                  <div
-                                    ref={filterPopoverRef}
-                                    className="absolute left-0 top-full mt-1 z-20 w-56 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-2"
-                                  >
-                                    <div className="px-2 pb-2 border-b border-gray-100 flex justify-between items-center">
-                                      <span className="text-xs font-medium text-gray-600">
-                                        {t('appList.filter.title')}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => clearColumnFilter(key)}
-                                        className="text-xs text-blue-600 hover:underline"
-                                      >
-                                        {t('common.reset')}
-                                      </button>
-                                    </div>
-                                    <div className="max-h-48 overflow-y-auto py-1">
-                                      {options.length === 0 ? (
-                                        <p className="px-2 py-1 text-xs text-gray-500">
-                                          {t('appList.filter.noValues')}
-                                        </p>
-                                      ) : (
-                                        options.map((val) => (
-                                          <label
-                                            key={val}
-                                            className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer"
-                                          >
-                                            <input
-                                              type="checkbox"
-                                              checked={selectedList.includes(val)}
-                                              onChange={() => toggleColumnFilter(key, val)}
-                                              className="rounded border-gray-300"
-                                            />
-                                            <span
-                                              className="text-xs truncate flex-1"
-                                              title={val}
-                                            >
-                                              {val || t('common.emptyValue')}
-                                            </span>
-                                          </label>
-                                        ))
-                                      )}
-                                    </div>
-                                    {hasFilter && (
-                                      <p className="px-2 pt-1 text-xs text-gray-500">
-                                        {t('appList.filter.selectedCount').replace(
-                                          '{count}',
-                                          String(selectedList.length)
-                                        )}
-                                      </p>
-                                    )}
+                                  <div ref={filterPopoverRef} className="absolute left-0 top-full mt-1 z-20">
+                                    <ColumnFilterPopover
+                                      options={options}
+                                      selected={selectedList}
+                                      valueCounts={valueCountsByKey[key] ?? {}}
+                                      numberLocale={dateLocale}
+                                      labels={columnFilterLabels}
+                                      onReset={() => clearColumnFilter(key)}
+                                      onSelectionChange={(next) => {
+                                        setColumnFilters((prev) => {
+                                          if (next.length === 0) {
+                                            const u = { ...prev };
+                                            delete u[key];
+                                            return u;
+                                          }
+                                          return { ...prev, [key]: next };
+                                        });
+                                        setPage(1);
+                                      }}
+                                      showSelectedFooter
+                                    />
                                   </div>
                                 )}
                               </div>

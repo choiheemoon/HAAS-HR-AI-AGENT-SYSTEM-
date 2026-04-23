@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
 
@@ -31,6 +31,36 @@ export default function SystemUserCompaniesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [meIsSuperuser, setMeIsSuperuser] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  const rawFilteredUsers = useMemo(() => {
+    const q = userSearchQuery.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => {
+      const idStr = String(u.id);
+      const name = (u.full_name ?? '').trim().toLowerCase();
+      return (
+        u.username.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        idStr.includes(q) ||
+        name.includes(q)
+      );
+    });
+  }, [users, userSearchQuery]);
+
+  const filteredUsers = useMemo(() => {
+    let list = rawFilteredUsers;
+    if (userId !== '') {
+      const sel = users.find((u) => u.id === userId);
+      if (sel && !list.some((u) => u.id === userId)) {
+        list = [sel, ...list];
+      }
+    }
+    return list;
+  }, [rawFilteredUsers, users, userId]);
+
+  const showUserSearchEmpty =
+    userSearchQuery.trim().length > 0 && rawFilteredUsers.length === 0 && userId === '';
 
   const loadBase = useCallback(async () => {
     setLoading(true);
@@ -159,21 +189,36 @@ export default function SystemUserCompaniesPage() {
 
       <div className="space-y-2">
         <label className="block text-sm font-medium text-gray-700">{t('system.ucm.selectUser')}</label>
-        <select
-          className="border rounded-md px-3 py-2 text-sm max-w-md w-full"
-          value={userId === '' ? '' : String(userId)}
-          onChange={(e) => {
-            const v = e.target.value;
-            setUserId(v === '' ? '' : Number(v));
-          }}
-        >
-          <option value="">{t('system.rgm.choose')}</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.username} ({u.email})
-            </option>
-          ))}
-        </select>
+        <div className="max-w-md w-full space-y-2">
+          <input
+            type="search"
+            className="border rounded-md px-3 py-2 text-sm w-full"
+            placeholder={t('system.ucm.userSearchPlaceholder')}
+            value={userSearchQuery}
+            onChange={(e) => setUserSearchQuery(e.target.value)}
+            autoComplete="off"
+          />
+          <select
+            className="border rounded-md px-3 py-2 text-sm w-full"
+            value={userId === '' ? '' : String(userId)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setUserId(v === '' ? '' : Number(v));
+            }}
+          >
+            <option value="">{t('system.rgm.choose')}</option>
+            {filteredUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.full_name?.trim()
+                  ? `${u.full_name.trim()} · ${u.username} (${u.email})`
+                  : `${u.username} (${u.email})`}
+              </option>
+            ))}
+          </select>
+        </div>
+        {showUserSearchEmpty ? (
+          <p className="text-xs text-gray-500 max-w-md">{t('system.ucm.userSearchNoMatch')}</p>
+        ) : null}
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white">

@@ -11,8 +11,10 @@ from app.core.user_privilege import user_has_unrestricted_app_menus
 
 
 # (menu_key, label_key, sort_order)
+# Sidebar 구조와 동일하게 유지한다.
 DEFAULT_APP_MENUS: Tuple[Tuple[str, str, int], ...] = (
     ("dashboard", "menu.dashboard", 10),
+    ("chat", "header.aiAssistant", 11),
     ("recruitment", "menu.recruitment", 20),
     ("recruitment-request", "recruitment.request", 21),
     ("recruitment-approval", "recruitment.approval", 22),
@@ -26,39 +28,51 @@ DEFAULT_APP_MENUS: Tuple[Tuple[str, str, int], ...] = (
     ("employees", "menu.employees", 30),
     ("hr-master-manage", "menu.hrMasterManage", 31),
     ("hr-master-inquiry", "menu.hrMasterInquiry", 32),
-    ("hr-master-family-inquiry", "menu.familyInquiry", 35),
-    ("hr-master-address-inquiry", "menu.hrMasterAddressInquiry", 36),
-    ("hr-personnel-record-card", "menu.personnelRecordCard", 37),
-    ("hr-personnel-record-card-history", "menu.personnelRecordCardHistory", 38),
-    ("hr-master-reference-manage", "menu.hrMasterReferenceManage", 33),
-    ("attendance", "menu.attendance", 40),
-    ("attendance-work-calendar-manage", "menu.attendanceWorkCalendarManage", 41),
-    ("attendance-standard-manage", "menu.attendanceStandardManage", 42),
-    ("attendance-master-manage", "menu.attendanceMasterManage", 43),
-    ("attendance-annual-manage", "menu.attendanceAnnualManage", 44),
-    ("attendance-inquiry", "menu.attendanceInquiry", 45),
-    ("attendance-additional-ot-manage", "menu.attendanceAdditionalOtManage", 46),
-    ("attendance-aggregate", "menu.attendanceAggregate", 47),
-    ("attendance-status-inquiry", "menu.attendanceStatusInquiry", 48),
-    ("attendance-allowance-status-inquiry", "menu.attendanceAllowanceStatusInquiry", 49),
-    ("attendance-ot-allowance-report", "menu.attendanceOtAllowanceReport", 50),
-    ("attendance-payroll-bucket-aggregate", "menu.attendancePayrollBucketAggregate", 51),
-    ("attendance-payroll-bucket-status", "menu.attendancePayrollBucketStatus", 52),
-    ("payroll", "menu.payroll", 53),
-    ("payslip", "menu.payslip", 60),
-    ("reports", "menu.reports", 70),
+    ("career-inquiry", "menu.careerInquiry", 33),
+    ("dependent-inquiry", "menu.dependentInquiry", 34),
+    ("education-inquiry", "menu.educationInquiry", 35),
+    ("hr-master-certification-inquiry", "menu.hrMasterCertificationInquiry", 36),
+    ("hr-master-family-inquiry", "menu.familyInquiry", 37),
+    ("hr-master-address-inquiry", "menu.hrMasterAddressInquiry", 38),
+    ("hr-master-language-inquiry", "menu.hrMasterLanguageInquiry", 39),
+    ("hr-personnel-record-card", "menu.personnelRecordCard", 40),
+    ("hr-personnel-record-card-history", "menu.personnelRecordCardHistory", 41),
+    ("hr-master-report", "menu.hrMasterReport", 42),
+    ("hr-master-reference-manage", "menu.hrMasterReferenceManage", 43),
+    ("attendance", "menu.attendance", 50),
+    ("attendance-master-manage", "menu.attendanceMasterManage", 51),
+    ("attendance-annual-manage", "menu.attendanceAnnualManage", 52),
+    ("attendance-leave-manage", "menu.attendanceLeaveManage", 53),
+    ("attendance-leave-status", "menu.attendanceLeaveStatus", 54),
+    ("attendance-inquiry", "menu.attendanceInquiry", 55),
+    ("attendance-additional-ot-manage", "menu.attendanceAdditionalOtManage", 56),
+    ("attendance-overview", "menu.attendanceOverview", 57),
+    ("attendance-report", "menu.attendanceReport", 58),
+    ("attendance-aggregate", "menu.attendanceAggregate", 59),
+    ("attendance-status-inquiry", "menu.attendanceStatusInquiry", 60),
+    ("attendance-allowance-status-inquiry", "menu.attendanceAllowanceStatusInquiry", 61),
+    ("attendance-ot-allowance-report", "menu.attendanceOtAllowanceReport", 62),
+    ("attendance-payroll-bucket-aggregate", "menu.attendancePayrollBucketAggregate", 63),
+    ("attendance-payroll-bucket-status", "menu.attendancePayrollBucketStatus", 64),
+    ("attendance-payroll-bucket-status-period", "menu.attendancePayrollBucketStatusPeriod", 65),
+    ("attendance-work-calendar-manage", "menu.attendanceWorkCalendarManage", 66),
+    ("attendance-standard-manage", "menu.attendanceStandardManage", 67),
+    ("payroll", "menu.payroll", 68),
     ("tax", "menu.tax", 80),
-    ("tax-company-manage", "menu.companyManage", 90),
-    ("tax-employee-type-manage", "menu.employeeTypeManage", 91),
+    ("master-data", "menu.masterData", 90),
+    ("tax-company-manage", "menu.companyManage", 91),
     ("master-major-code-manage", "menu.majorCodeManage", 92),
     ("master-minor-code-manage", "menu.minorCodeManage", 93),
-    ("chat", "header.aiAssistant", 100),
-    ("system-users", "menu.systemUsers", 200),
-    ("system-user-companies", "menu.systemUserCompanies", 201),
-    ("system-role-groups", "menu.systemRoleGroups", 202),
-    ("system-role-group-menus", "menu.systemRoleGroupMenus", 203),
-    ("system-template-generation", "menu.systemTemplateGeneration", 204),
+    ("system", "menu.system", 200),
+    ("system-users", "menu.systemUsers", 201),
+    ("system-user-companies", "menu.systemUserCompanies", 202),
+    ("system-role-groups", "menu.systemRoleGroups", 203),
+    ("system-role-group-menus", "menu.systemRoleGroupMenus", 204),
+    ("system-template-generation", "menu.systemTemplateGeneration", 205),
 )
+
+# RBAC 매트릭스에서 제외(기존 DB 행은 seed 시 삭제). 탭 권한은 TAB_PERMISSION_ALIAS 로 위임.
+REMOVED_APP_MENU_KEYS: Tuple[str, ...] = ("payslip", "reports")
 
 
 class SystemRbacService:
@@ -104,30 +118,52 @@ class SystemRbacService:
         return q.first()
 
     def seed_menus_if_needed(self) -> int:
-        """없는 menu_key만 삽입. 추가된 행 수 반환."""
+        """없는 menu_key는 삽입하고, 기존 행은 label_key·sort_order를 목록과 동기화. 추가된 행 수 반환."""
         added = 0
+        dirty = False
+        desired_keys = {menu_key for menu_key, _, _ in DEFAULT_APP_MENUS}
+        for row_rm in self.db.query(AppMenu).all():
+            if row_rm.menu_key in desired_keys:
+                continue
+            # legacy/미사용 메뉴는 매트릭스에서 정리한다.
+            self.db.delete(row_rm)
+            dirty = True
+        for mk in REMOVED_APP_MENU_KEYS:
+            row_rm = self.db.query(AppMenu).filter(AppMenu.menu_key == mk).first()
+            if row_rm:
+                self.db.delete(row_rm)
+                dirty = True
         for menu_key, label_key, sort_order in DEFAULT_APP_MENUS:
-            exists = (
+            row = (
                 self.db.query(AppMenu).filter(AppMenu.menu_key == menu_key).first()
             )
-            if exists:
-                continue
-            m = AppMenu(menu_key=menu_key, label_key=label_key, sort_order=sort_order)
-            self.db.add(m)
-            self.db.flush()
-            added += 1
-            for g in self.db.query(PermissionGroup).all():
-                self.db.add(
-                    GroupMenuPermission(
-                        permission_group_id=g.id,
-                        app_menu_id=m.id,
-                        can_create=False,
-                        can_read=False,
-                        can_update=False,
-                        can_delete=False,
-                    )
+            if not row:
+                m = AppMenu(
+                    menu_key=menu_key, label_key=label_key, sort_order=sort_order
                 )
-        if added:
+                self.db.add(m)
+                self.db.flush()
+                added += 1
+                dirty = True
+                for g in self.db.query(PermissionGroup).all():
+                    self.db.add(
+                        GroupMenuPermission(
+                            permission_group_id=g.id,
+                            app_menu_id=m.id,
+                            can_create=False,
+                            can_read=False,
+                            can_update=False,
+                            can_delete=False,
+                        )
+                    )
+                continue
+            if row.label_key != label_key:
+                row.label_key = label_key
+                dirty = True
+            if row.sort_order != sort_order:
+                row.sort_order = sort_order
+                dirty = True
+        if dirty:
             self.db.commit()
         return added
 
@@ -328,10 +364,16 @@ class SystemRbacService:
         return self.get_group_menu_matrix(gid, current_user=user)
 
     # —— 사용자 ——
-    def list_users(self, current_user: User) -> List[User]:
+    def list_users(
+        self, current_user: User, company_id: Optional[int] = None
+    ) -> List[User]:
         q = self.db.query(User)
         if not self._is_superadmin(current_user):
             q = q.filter(User.system_group_code == self._current_user_group_code(current_user))
+        if company_id is not None:
+            q = q.join(UserCompanyAccess, UserCompanyAccess.user_id == User.id).filter(
+                UserCompanyAccess.company_id == int(company_id)
+            )
         return q.order_by(User.id.asc()).all()
 
     def create_user(self, data: Dict[str, Any], current_user: User) -> User:

@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { FileDown, Printer, RefreshCw, Eye, Filter, ChevronDown, X, Link2 } from 'lucide-react';
+import { ColumnFilterPopover } from '@/components/ui/ColumnFilterPopover';
 import { apiClient } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
 import { useMenuPermissions } from '@/contexts/MenuPermissionContext';
@@ -96,6 +97,7 @@ function defaultCertificateIssueDateRange(): { from: string; to: string } {
 
 export default function PersonnelRecordCardHistoryPage() {
   const { t, locale } = useI18n();
+  const numberLocale = locale === 'ko' ? 'ko-KR' : locale === 'th' ? 'th-TH' : 'en-US';
   const { can, loading: permLoading } = useMenuPermissions();
   const allowRead = can('hr-personnel-record-card-history', 'can_read');
   const printRef = useRef<HTMLDivElement>(null);
@@ -406,6 +408,44 @@ export default function PersonnelRecordCardHistoryPage() {
     return map;
   }, [rows]);
 
+  const valueCountsByKey = useMemo(() => {
+    const keys: FilterKey[] = [
+      'id',
+      'employee',
+      'docNo',
+      'kind',
+      'issueDate',
+      'registeredBy',
+      'registeredAt',
+      'portal',
+    ];
+    const map = {} as Record<FilterKey, Record<string, number>>;
+    keys.forEach((k) => {
+      map[k] = {};
+      rows.forEach((r) => {
+        const v = getRowDisplay(r)[k];
+        if (!v) return;
+        map[k][v] = (map[k][v] ?? 0) + 1;
+      });
+    });
+    return map;
+  }, [rows, t]);
+
+  const columnFilterLabels = useMemo(
+    () => ({
+      title: t('appList.filter.title'),
+      reset: t('common.reset'),
+      noValues: t('appList.filter.noValues'),
+      noMatchingValues: t('appList.filter.noMatchingValues'),
+      valueSearchPlaceholder: t('appList.filter.valueSearchPlaceholder'),
+      selectAll: t('appList.table.selectAll'),
+      deselectAll: t('appList.filter.deselectAll'),
+      emptyValue: t('common.emptyValue'),
+      selectedCountTemplate: t('appList.filter.selectedCount'),
+    }),
+    [t]
+  );
+
   const total = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -415,14 +455,6 @@ export default function PersonnelRecordCardHistoryPage() {
   }, [filteredRows, safePage, pageSize]);
   const startItem = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const endItem = total === 0 ? 0 : Math.min(safePage * pageSize, total);
-
-  const toggleColumnFilter = (key: FilterKey, value: string) => {
-    setColumnFilters((prev) => {
-      const arr = prev[key] ?? [];
-      const next = arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
-      return { ...prev, [key]: next };
-    });
-  };
 
   const clearColumnFilter = (key: FilterKey) => {
     setColumnFilters((prev) => ({ ...prev, [key]: [] }));
@@ -670,39 +702,18 @@ export default function PersonnelRecordCardHistoryPage() {
                               <ChevronDown className="w-4 h-4" />
                             </button>
                             {openFilterKey === key && (
-                              <div
-                                ref={filterPopoverRef}
-                                className="absolute left-0 top-full mt-1 z-20 w-56 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-2"
-                              >
-                                <div className="px-2 pb-2 border-b border-gray-100 flex justify-between items-center">
-                                  <span className="text-xs font-medium text-gray-600">필터</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => clearColumnFilter(key)}
-                                    className="text-xs text-blue-600 hover:underline"
-                                  >
-                                    초기화
-                                  </button>
-                                </div>
-                                <div className="max-h-48 overflow-y-auto py-1">
-                                  {options.length === 0 ? (
-                                    <p className="px-2 py-1 text-xs text-gray-500">값이 없습니다.</p>
-                                  ) : (
-                                    options.map((val) => (
-                                      <label key={val} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedValues.includes(val)}
-                                          onChange={() => toggleColumnFilter(key, val)}
-                                          className="rounded border-gray-300"
-                                        />
-                                        <span className="text-xs truncate flex-1" title={val}>
-                                          {val}
-                                        </span>
-                                      </label>
-                                    ))
-                                  )}
-                                </div>
+                              <div ref={filterPopoverRef} className="absolute left-0 top-full mt-1 z-20">
+                                <ColumnFilterPopover
+                                  options={options}
+                                  selected={selectedValues}
+                                  valueCounts={valueCountsByKey[key] ?? {}}
+                                  numberLocale={numberLocale}
+                                  labels={columnFilterLabels}
+                                  onReset={() => clearColumnFilter(key)}
+                                  onSelectionChange={(next) =>
+                                    setColumnFilters((prev) => ({ ...prev, [key]: next }))
+                                  }
+                                />
                               </div>
                             )}
                           </div>

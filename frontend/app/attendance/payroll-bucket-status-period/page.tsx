@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Filter } from 'lucide-react';
+import { ColumnFilterPopover } from '@/components/ui/ColumnFilterPopover';
 import { apiClient } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
 import { useMenuPermissions } from '@/contexts/MenuPermissionContext';
@@ -148,6 +149,7 @@ function companyLabel(c: Company, locale: string): string {
 
 export default function AttendancePayrollBucketStatusPeriodPage() {
   const { t, locale } = useI18n();
+  const numberLocale = locale === 'ko' ? 'ko-KR' : locale === 'th' ? 'th-TH' : 'en-US';
   const { can } = useMenuPermissions();
   const allowRead = can('attendance-allowance-status-inquiry', 'can_read');
 
@@ -350,6 +352,35 @@ export default function AttendancePayrollBucketStatusPeriodPage() {
     return map;
   }, [items, locale, primaryCellText, t]);
 
+  const valueCountsByKey = useMemo(() => {
+    const map: Record<string, Record<string, number>> = {};
+    [...PRIMARY_COL_KEYS, ...ALL_COL_KEYS].forEach((k) => {
+      map[k] = {};
+      items.forEach((row) => {
+        const v = PRIMARY_COL_KEYS.includes(k as PrimaryColKey)
+          ? primaryCellText(row, k as PrimaryColKey)
+          : cellText(row, k as ColKey, t, locale);
+        map[k][v] = (map[k][v] ?? 0) + 1;
+      });
+    });
+    return map;
+  }, [items, locale, primaryCellText, t]);
+
+  const columnFilterLabels = useMemo(
+    () => ({
+      title: t('appList.filter.title'),
+      reset: t('common.reset'),
+      noValues: t('appList.filter.noValues'),
+      noMatchingValues: t('appList.filter.noMatchingValues'),
+      valueSearchPlaceholder: t('appList.filter.valueSearchPlaceholder'),
+      selectAll: t('appList.table.selectAll'),
+      deselectAll: t('appList.filter.deselectAll'),
+      emptyValue: t('common.emptyValue'),
+      selectedCountTemplate: t('appList.filter.selectedCount'),
+    }),
+    [t]
+  );
+
   const filteredItems = useMemo(() => {
     if (Object.keys(columnFilters).length === 0) return items;
     return items.filter((row) =>
@@ -363,19 +394,6 @@ export default function AttendancePayrollBucketStatusPeriodPage() {
       })
     );
   }, [columnFilters, items, locale, primaryCellText, t]);
-
-  const toggleColumnFilter = (key: FilterColKey, value: string) => {
-    setColumnFilters((prev) => {
-      const arr = prev[key] ?? [];
-      const next = arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
-      if (next.length === 0) {
-        const u = { ...prev };
-        delete u[key];
-        return u;
-      }
-      return { ...prev, [key]: next };
-    });
-  };
 
   const clearColumnFilter = (key: FilterColKey) => {
     setColumnFilters((prev) => {
@@ -555,39 +573,25 @@ export default function AttendancePayrollBucketStatusPeriodPage() {
                               <ChevronDown className="w-4 h-4" />
                             </button>
                             {openFilterKey === key && (
-                              <div
-                                ref={filterPopoverRef}
-                                className="absolute left-0 top-full mt-1 z-20 w-56 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-2"
-                              >
-                                <div className="px-2 pb-2 border-b border-gray-100 flex justify-between items-center">
-                                  <span className="text-xs font-medium text-gray-600">{t('appList.filter.title')}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => clearColumnFilter(key)}
-                                    className="text-xs text-blue-600 hover:underline"
-                                  >
-                                    {t('common.reset')}
-                                  </button>
-                                </div>
-                                <div className="max-h-48 overflow-y-auto py-1">
-                                  {options.length === 0 ? (
-                                    <p className="px-2 py-1 text-xs text-gray-500">{t('appList.filter.noValues')}</p>
-                                  ) : (
-                                    options.map((val) => (
-                                      <label key={val} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedList.includes(val)}
-                                          onChange={() => toggleColumnFilter(key, val)}
-                                          className="rounded border-gray-300"
-                                        />
-                                        <span className="text-xs truncate flex-1" title={val}>
-                                          {val || t('common.emptyValue')}
-                                        </span>
-                                      </label>
-                                    ))
-                                  )}
-                                </div>
+                              <div ref={filterPopoverRef} className="absolute left-0 top-full mt-1 z-20">
+                                <ColumnFilterPopover
+                                  options={options}
+                                  selected={selectedList}
+                                  valueCounts={valueCountsByKey[key] ?? {}}
+                                  numberLocale={numberLocale}
+                                  labels={columnFilterLabels}
+                                  onReset={() => clearColumnFilter(key)}
+                                  onSelectionChange={(next) => {
+                                    setColumnFilters((prev) => {
+                                      if (next.length === 0) {
+                                        const u = { ...prev };
+                                        delete u[key];
+                                        return u;
+                                      }
+                                      return { ...prev, [key]: next };
+                                    });
+                                  }}
+                                />
                               </div>
                             )}
                           </div>
@@ -613,39 +617,25 @@ export default function AttendancePayrollBucketStatusPeriodPage() {
                               <ChevronDown className="w-4 h-4" />
                             </button>
                             {openFilterKey === key && (
-                              <div
-                                ref={filterPopoverRef}
-                                className="absolute left-0 top-full mt-1 z-20 w-56 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-2"
-                              >
-                                <div className="px-2 pb-2 border-b border-gray-100 flex justify-between items-center">
-                                  <span className="text-xs font-medium text-gray-600">{t('appList.filter.title')}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => clearColumnFilter(key)}
-                                    className="text-xs text-blue-600 hover:underline"
-                                  >
-                                    {t('common.reset')}
-                                  </button>
-                                </div>
-                                <div className="max-h-48 overflow-y-auto py-1">
-                                  {options.length === 0 ? (
-                                    <p className="px-2 py-1 text-xs text-gray-500">{t('appList.filter.noValues')}</p>
-                                  ) : (
-                                    options.map((val) => (
-                                      <label key={val} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedList.includes(val)}
-                                          onChange={() => toggleColumnFilter(key, val)}
-                                          className="rounded border-gray-300"
-                                        />
-                                        <span className="text-xs truncate flex-1" title={val}>
-                                          {val || t('common.emptyValue')}
-                                        </span>
-                                      </label>
-                                    ))
-                                  )}
-                                </div>
+                              <div ref={filterPopoverRef} className="absolute left-0 top-full mt-1 z-20">
+                                <ColumnFilterPopover
+                                  options={options}
+                                  selected={selectedList}
+                                  valueCounts={valueCountsByKey[key] ?? {}}
+                                  numberLocale={numberLocale}
+                                  labels={columnFilterLabels}
+                                  onReset={() => clearColumnFilter(key)}
+                                  onSelectionChange={(next) => {
+                                    setColumnFilters((prev) => {
+                                      if (next.length === 0) {
+                                        const u = { ...prev };
+                                        delete u[key];
+                                        return u;
+                                      }
+                                      return { ...prev, [key]: next };
+                                    });
+                                  }}
+                                />
                               </div>
                             )}
                           </div>

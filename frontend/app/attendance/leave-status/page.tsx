@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRef } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
+import { ColumnFilterPopover } from '@/components/ui/ColumnFilterPopover';
 import { apiClient } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
 import { useMenuPermissions } from '@/contexts/MenuPermissionContext';
@@ -245,7 +246,8 @@ function pickRefLabel(it: RefItem): string {
 }
 
 export default function AttendanceLeaveStatusPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const numberLocale = locale === 'ko' ? 'ko-KR' : locale === 'th' ? 'th-TH' : 'en-US';
   const { can } = useMenuPermissions();
   const allowRead = can('attendance-leave-status', 'can_read');
 
@@ -593,6 +595,34 @@ export default function AttendanceLeaveStatusPage() {
     return map;
   }, [rowsForTable]);
 
+  const valueCountsByKey = useMemo(() => {
+    const keys = ['factory', 'department', 'employeeNo', 'employeeName', 'leaveGrade'] as const;
+    const map: Record<string, Record<string, number>> = {};
+    for (const key of keys) {
+      map[key] = {};
+      for (const row of rowsForTable) {
+        const v = String(row[key] || '-');
+        map[key][v] = (map[key][v] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [rowsForTable]);
+
+  const columnFilterLabels = useMemo(
+    () => ({
+      title: t('appList.filter.title'),
+      reset: t('common.reset'),
+      noValues: t('appList.filter.noValues'),
+      noMatchingValues: t('appList.filter.noMatchingValues'),
+      valueSearchPlaceholder: t('appList.filter.valueSearchPlaceholder'),
+      selectAll: t('appList.table.selectAll'),
+      deselectAll: t('appList.filter.deselectAll'),
+      emptyValue: t('common.emptyValue'),
+      selectedCountTemplate: t('appList.filter.selectedCount'),
+    }),
+    [t]
+  );
+
   const filteredRows = useMemo(() => {
     if (Object.keys(columnFilters).every((k) => !columnFilters[k]?.length)) return rowsForTable;
     return rowsForTable.filter((row) => {
@@ -606,19 +636,6 @@ export default function AttendanceLeaveStatusPage() {
       return true;
     });
   }, [rowsForTable, columnFilters]);
-
-  const toggleColumnFilter = (key: string, value: string) => {
-    setColumnFilters((prev) => {
-      const arr = prev[key] ?? [];
-      const next = arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
-      if (next.length === 0) {
-        const u = { ...prev };
-        delete u[key];
-        return u;
-      }
-      return { ...prev, [key]: next };
-    });
-  };
 
   const clearColumnFilter = (key: string) => {
     setColumnFilters((prev) => {
@@ -897,40 +914,26 @@ export default function AttendanceLeaveStatusPage() {
                           <ChevronDown className="w-3.5 h-3.5" />
                         </button>
                         {openFilterKey === col.key && (
-                          <div
-                            ref={filterPopoverRef}
-                            className="absolute left-0 top-full mt-1 z-20 w-56 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-2"
-                          >
-                            <div className="px-2 pb-2 border-b border-gray-100 flex justify-between items-center">
-                              <span className="text-xs font-medium text-gray-600">{t('appList.filter.title', '필터')}</span>
-                              <button type="button" onClick={() => clearColumnFilter(col.key)} className="text-xs text-blue-600 hover:underline">
-                                {t('common.reset')}
-                              </button>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto py-1">
-                              {options.length === 0 ? (
-                                <p className="px-2 py-1 text-xs text-gray-500">{t('appList.filter.noValues', '값 없음')}</p>
-                              ) : (
-                                options.map((val) => (
-                                  <label key={val} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedList.includes(val)}
-                                      onChange={() => toggleColumnFilter(col.key, val)}
-                                      className="rounded border-gray-300"
-                                    />
-                                    <span className="text-xs truncate flex-1 text-gray-800" title={val}>
-                                      {val}
-                                    </span>
-                                  </label>
-                                ))
-                              )}
-                            </div>
-                            {hasFilter && (
-                              <p className="px-2 pt-1 text-xs text-gray-500">
-                                {t('appList.filter.selectedCount', '선택: {count}개').replace('{count}', String(selectedList.length))}
-                              </p>
-                            )}
+                          <div ref={filterPopoverRef} className="absolute left-0 top-full mt-1 z-20">
+                            <ColumnFilterPopover
+                              options={options}
+                              selected={selectedList}
+                              valueCounts={valueCountsByKey[col.key] ?? {}}
+                              numberLocale={numberLocale}
+                              labels={columnFilterLabels}
+                              onReset={() => clearColumnFilter(col.key)}
+                              onSelectionChange={(next) => {
+                                setColumnFilters((prev) => {
+                                  if (next.length === 0) {
+                                    const u = { ...prev };
+                                    delete u[col.key];
+                                    return u;
+                                  }
+                                  return { ...prev, [col.key]: next };
+                                });
+                              }}
+                              showSelectedFooter
+                            />
                           </div>
                         )}
                       </div>

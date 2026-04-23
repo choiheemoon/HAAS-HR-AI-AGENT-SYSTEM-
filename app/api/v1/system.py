@@ -1,5 +1,5 @@
 """시스템 관리 API (사용자·권한그룹·메뉴 권한)"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List
@@ -136,10 +136,11 @@ def put_group_menu_permissions(
 # —— 사용자 관리 ——
 @router.get("/users", response_model=List[AdminUserResponse])
 def list_system_users(
+    company_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_system_admin),
 ):
-    return _svc(db).list_users(current_user=current_user)
+    return _svc(db).list_users(current_user=current_user, company_id=company_id)
 
 
 @router.post("/users", response_model=AdminUserResponse)

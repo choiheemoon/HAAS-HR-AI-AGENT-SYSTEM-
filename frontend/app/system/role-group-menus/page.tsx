@@ -1,11 +1,37 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Folder } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
 
-type Group = { id: number; code: string; name: string };
+type Group = {
+  id: number;
+  system_group_code: string;
+  code: string;
+  name: string;
+  description?: string | null;
+};
+
+type CompanyRow = {
+  id: number;
+  system_group_code: string;
+  company_code: string;
+  name_kor?: string | null;
+  name_eng?: string | null;
+  name_thai?: string | null;
+};
+
+function companyListLabel(c: CompanyRow): string {
+  const name = (c.name_kor || c.name_eng || c.name_thai || '').trim();
+  return name ? `${name} (${c.company_code})` : c.company_code;
+}
+
+function permissionGroupOptionLabel(g: Group, showSystemGroupPrefix: boolean): string {
+  const prefix = showSystemGroupPrefix ? `[${g.system_group_code}] ` : '';
+  return `${prefix}${g.code} — ${g.name}`;
+}
+
 type Row = {
   menu_id: number;
   menu_key: string;
@@ -22,32 +48,65 @@ type PermKey = 'can_create' | 'can_read' | 'can_update' | 'can_delete';
  * DB menu_key가 `부모키-자식세그먼트` 패턴이 아닌 경우의 부모 지정.
  * (예: 인사 마스터 메뉴는 `employees-*`가 아니라 `hr-master-*` 네이밍)
  */
+/**
+ * Sidebar와 동일한 평면 트리: 직원·근태 하위는 각각 `employees` / `attendance` 직속.
+ * (menu_key 접두사 규칙만 쓰면 payroll-bucket-status-period 등이 중간 노드 아래로 붙는다.)
+ */
 const MENU_PARENT_BY_KEY: Record<string, string> = {
-  'hr-master-report': 'employees',
+  chat: 'dashboard',
   'hr-master-manage': 'employees',
   'hr-master-inquiry': 'employees',
   'career-inquiry': 'employees',
   'dependent-inquiry': 'employees',
   'education-inquiry': 'employees',
   'hr-master-certification-inquiry': 'employees',
+  'hr-master-family-inquiry': 'employees',
   'hr-master-address-inquiry': 'employees',
   'hr-master-language-inquiry': 'employees',
   'hr-personnel-record-card': 'employees',
+  'hr-personnel-record-card-history': 'employees',
+  'hr-master-report': 'employees',
   'hr-master-reference-manage': 'employees',
-  'hr-master-family-inquiry': 'employees',
+  'attendance-master-manage': 'attendance',
+  'attendance-annual-manage': 'attendance',
+  'attendance-leave-manage': 'attendance',
+  'attendance-leave-status': 'attendance',
+  'attendance-inquiry': 'attendance',
+  'attendance-additional-ot-manage': 'attendance',
+  'attendance-overview': 'attendance',
+  'attendance-report': 'attendance',
+  'attendance-aggregate': 'attendance',
+  'attendance-status-inquiry': 'attendance',
+  'attendance-allowance-status-inquiry': 'attendance',
+  'attendance-ot-allowance-report': 'attendance',
+  'attendance-payroll-bucket-aggregate': 'attendance',
+  'attendance-payroll-bucket-status': 'attendance',
+  'attendance-payroll-bucket-status-period': 'attendance',
+  'attendance-work-calendar-manage': 'attendance',
+  'attendance-standard-manage': 'attendance',
+  'tax-company-manage': 'master-data',
+  'master-major-code-manage': 'master-data',
+  'master-minor-code-manage': 'master-data',
+  'system-users': 'system',
+  'system-user-companies': 'system',
+  'system-role-groups': 'system',
+  'system-role-group-menus': 'system',
+  'system-template-generation': 'system',
 };
 
 function buildMenuTree(rows: Row[]) {
-  const byKey = new Map(rows.map((r) => [r.menu_key, r]));
+  const norm = (v: string) => (v || '').trim();
+  const byKey = new Map(rows.map((r) => [norm(r.menu_key), r]));
   const keys = Array.from(byKey.keys());
 
   const parentKeyOf = (menuKey: string): string | null => {
-    const forced = MENU_PARENT_BY_KEY[menuKey];
+    const key = norm(menuKey);
+    const forced = MENU_PARENT_BY_KEY[key];
     if (forced && byKey.has(forced)) return forced;
     let best: string | null = null;
     for (const k of keys) {
-      if (k === menuKey) continue;
-      if (menuKey.startsWith(`${k}-`)) {
+      if (k === key) continue;
+      if (key.startsWith(`${k}-`)) {
         if (best === null || k.length > best.length) best = k;
       }
     }
@@ -120,6 +179,10 @@ function PermissionCheckbox({
 export default function SystemRoleGroupMenusPage() {
   const { t } = useI18n();
   const [groups, setGroups] = useState<Group[]>([]);
+  const [companies, setCompanies] = useState<CompanyRow[]>([]);
+  const [companyFilterId, setCompanyFilterId] = useState<number | ''>('');
+  const [companyFilterSearch, setCompanyFilterSearch] = useState('');
+  const [groupFilterSearch, setGroupFilterSearch] = useState('');
   const [groupId, setGroupId] = useState<number | ''>('');
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,10 +200,75 @@ export default function SystemRoleGroupMenusPage() {
 
   const rowById = useMemo(() => new Map(rows.map((r) => [r.menu_id, r])), [rows]);
 
+  const sortedCompanies = useMemo(
+    () =>
+      [...companies].sort((a, b) =>
+        companyListLabel(a).localeCompare(companyListLabel(b), undefined, {
+          sensitivity: 'base',
+        })
+      ),
+    [companies]
+  );
+
+  const companySearchNorm = companyFilterSearch.trim().toLowerCase();
+
+  const visibleCompanies = useMemo(() => {
+    if (!companySearchNorm) return sortedCompanies;
+    return sortedCompanies.filter((c) =>
+      [c.company_code, c.name_kor ?? '', c.name_eng ?? '', c.name_thai ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(companySearchNorm)
+    );
+  }, [sortedCompanies, companySearchNorm]);
+
+  const groupsForCompanyFilter = useMemo(() => {
+    if (companyFilterId === '') return groups;
+    const co = companies.find((c) => c.id === companyFilterId);
+    if (!co) return groups;
+    const sg = (co.system_group_code || '').trim();
+    return groups.filter((g) => (g.system_group_code || '').trim() === sg);
+  }, [groups, companies, companyFilterId]);
+
+  const groupSearchNorm = groupFilterSearch.trim().toLowerCase();
+
+  const visibleGroups = useMemo(() => {
+    if (!groupSearchNorm) return groupsForCompanyFilter;
+    return groupsForCompanyFilter.filter((g) => {
+      const blob = [g.system_group_code, g.code, g.name, g.description ?? '']
+        .join(' ')
+        .toLowerCase();
+      return blob.includes(groupSearchNorm);
+    });
+  }, [groupsForCompanyFilter, groupSearchNorm]);
+
+  const showSystemGroupInGroupOptions = companyFilterId === '';
+
+  useEffect(() => {
+    if (groupId === '') return;
+    if (!visibleGroups.some((g) => g.id === groupId)) {
+      setGroupId('');
+    }
+  }, [visibleGroups, groupId]);
+
   const loadGroups = useCallback(async () => {
-    const res = await apiClient.getPermissionGroups();
-    setGroups(res.data as Group[]);
-    setLoading(false);
+    setLoading(true);
+    try {
+      const gRes = await apiClient.getPermissionGroups();
+      setGroups(gRes.data as Group[]);
+      try {
+        const cRes = await apiClient.getCompanies();
+        setCompanies(cRes.data as CompanyRow[]);
+      } catch {
+        setCompanies([]);
+      }
+    } catch (e) {
+      console.error(e);
+      setGroups([]);
+      setCompanies([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -309,18 +437,32 @@ export default function SystemRoleGroupMenusPage() {
     const children = tree.childrenByParentId.get(r.menu_id) ?? [];
     const hasChildren = children.length > 0;
     const expanded = expandedIds.has(r.menu_id);
-    const pad = depth * 14;
 
     renderRows.push(
-      <tr key={r.menu_id}>
-        <td className="px-2 py-1">
-          <div className="flex items-start gap-0.5" style={{ paddingLeft: pad }}>
+      <tr
+        key={r.menu_id}
+        className="group border-b border-slate-100 bg-white transition-colors hover:bg-slate-50/90"
+      >
+        <td className="px-0 py-0 align-middle">
+          <div
+            className="flex items-start gap-1.5 py-2.5 pr-3 min-w-[12rem]"
+            style={{
+              paddingLeft: `${10 + depth * 16}px`,
+              ...(depth > 0
+                ? {
+                    borderLeftWidth: 2,
+                    borderLeftStyle: 'solid',
+                    borderLeftColor: 'rgb(203 213 225)',
+                  }
+                : {}),
+            }}
+          >
             {hasChildren ? (
               <button
                 type="button"
                 aria-expanded={expanded}
                 onClick={() => toggleExpanded(r.menu_id)}
-                className="mt-0.5 p-0.5 rounded text-gray-500 hover:bg-gray-100 shrink-0"
+                className="mt-0.5 p-0.5 rounded-md text-slate-500 bg-slate-100/90 hover:bg-slate-200/90 shrink-0 leading-none"
               >
                 {expanded ? (
                   <ChevronDown className="w-4 h-4" aria-hidden />
@@ -329,12 +471,27 @@ export default function SystemRoleGroupMenusPage() {
                 )}
               </button>
             ) : (
-              <span className="w-5 shrink-0 inline-block" aria-hidden />
+              <span className="w-6 shrink-0 inline-block" aria-hidden />
             )}
-            <div>
-              <span className="font-mono text-gray-600">{r.menu_key}</span>
-              <br />
-              <span className="text-gray-800">{t(r.label_key)}</span>
+            {hasChildren ? (
+              <Folder
+                className="w-4 h-4 text-slate-400 shrink-0 mt-0.5"
+                aria-hidden
+              />
+            ) : (
+              <FileText
+                className="w-4 h-4 text-slate-300 shrink-0 mt-0.5"
+                aria-hidden
+              />
+            )}
+            <div className="min-w-0 flex-1 pt-0.5">
+              <span className="text-sm font-medium text-slate-900 leading-snug">
+                {t(r.label_key)}
+              </span>
+              <span className="text-sm font-normal text-slate-400">, </span>
+              <code className="text-xs font-mono text-slate-500 font-normal break-all">
+                {r.menu_key}
+              </code>
             </div>
           </div>
         </td>
@@ -342,7 +499,10 @@ export default function SystemRoleGroupMenusPage() {
           const { all, none } = permRollup(r.menu_id, k);
           const indeterminate = hasChildren && !all && !none;
           return (
-            <td key={k} className="px-2 py-1 text-center align-top">
+            <td
+              key={k}
+              className="px-2 py-2 text-center align-middle bg-white group-hover:bg-slate-50/90 w-14"
+            >
               <PermissionCheckbox
                 checked={all}
                 indeterminate={indeterminate}
@@ -372,24 +532,67 @@ export default function SystemRoleGroupMenusPage() {
         <h1 className="text-lg font-bold text-gray-900">{t('menu.systemRoleGroupMenus')}</h1>
         <p className="text-sm text-gray-500">{t('system.rgm.subtitle')}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm text-gray-700">
-          {t('system.rgm.selectGroup')}
-          <select
-            className="ml-2 border rounded px-2 py-1"
-            value={groupId === '' ? '' : String(groupId)}
-            onChange={(e) =>
-              setGroupId(e.target.value === '' ? '' : Number(e.target.value))
-            }
-          >
-            <option value="">{t('system.rgm.choose')}</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.code} — {g.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+          <label className="flex flex-col gap-1 text-sm text-gray-700 min-w-[200px] lg:max-w-xs">
+            <span>{t('system.rgm.companySearchLabel')}</span>
+            <input
+              type="search"
+              value={companyFilterSearch}
+              onChange={(e) => setCompanyFilterSearch(e.target.value)}
+              placeholder={t('system.rgm.companySearchPlaceholder')}
+              aria-label={t('system.rgm.companySearchPlaceholder')}
+              className="border rounded px-2 py-1.5 text-gray-800 placeholder:text-gray-400 w-full"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-gray-700 min-w-[200px] lg:max-w-xs">
+            <span>{t('system.rgm.filterCompany')}</span>
+            <select
+              className="border rounded px-2 py-1.5 text-gray-800 w-full"
+              value={companyFilterId === '' ? '' : String(companyFilterId)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCompanyFilterId(v === '' ? '' : Number(v));
+              }}
+            >
+              <option value="">{t('system.rgm.allCompanies')}</option>
+              {visibleCompanies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {companyListLabel(c)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-gray-700 flex-1 min-w-[200px] max-w-md">
+            <span>{t('system.rgm.groupFilterLabel')}</span>
+            <input
+              type="search"
+              value={groupFilterSearch}
+              onChange={(e) => setGroupFilterSearch(e.target.value)}
+              placeholder={t('system.rgm.groupSearchPlaceholder')}
+              aria-label={t('system.rgm.groupSearchPlaceholder')}
+              className="border rounded px-2 py-1.5 text-gray-800 placeholder:text-gray-400 w-full"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-gray-700 flex-1 min-w-[220px] max-w-lg">
+            <span>{t('system.rgm.selectGroup')}</span>
+            <select
+              className="border rounded px-2 py-1.5 text-gray-800 w-full"
+              value={groupId === '' ? '' : String(groupId)}
+              onChange={(e) =>
+                setGroupId(e.target.value === '' ? '' : Number(e.target.value))
+              }
+            >
+              <option value="">{t('system.rgm.choose')}</option>
+              {visibleGroups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {permissionGroupOptionLabel(g, showSystemGroupInGroupOptions)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
         <input
           type="search"
           value={menuSearch}
@@ -423,19 +626,20 @@ export default function SystemRoleGroupMenusPage() {
         >
           {t('system.saveMatrix')}
         </button>
+        </div>
       </div>
-      <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table className="min-w-full text-xs text-left">
-          <thead className="bg-gray-50 text-gray-600">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-full text-left">
+          <thead className="bg-slate-100/95 text-slate-600 text-xs font-semibold uppercase tracking-wide">
             <tr>
-              <th className="px-2 py-2">{t('system.crud.menu')}</th>
-              <th className="px-2 py-2">{t('system.crud.create')}</th>
-              <th className="px-2 py-2">{t('system.crud.read')}</th>
-              <th className="px-2 py-2">{t('system.crud.update')}</th>
-              <th className="px-2 py-2">{t('system.crud.delete')}</th>
+              <th className="px-3 py-3 text-left">{t('system.crud.menu')}</th>
+              <th className="px-2 py-3 text-center w-14">{t('system.crud.create')}</th>
+              <th className="px-2 py-3 text-center w-14">{t('system.crud.read')}</th>
+              <th className="px-2 py-3 text-center w-14">{t('system.crud.update')}</th>
+              <th className="px-2 py-3 text-center w-14">{t('system.crud.delete')}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="text-xs">
             {groupId !== '' && rows.length > 0 && renderRows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-gray-500">

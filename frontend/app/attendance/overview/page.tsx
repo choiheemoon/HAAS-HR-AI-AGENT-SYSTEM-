@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
+import { ColumnFilterPopover } from '@/components/ui/ColumnFilterPopover';
 import { apiClient } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
 import { useMenuPermissions } from '@/contexts/MenuPermissionContext';
@@ -59,6 +60,7 @@ function fmtWeekday(iso?: string | null, loc?: string): string {
 
 export default function AttendanceOverviewPage() {
   const { t, locale } = useI18n();
+  const numberLocale = locale === 'ko' ? 'ko-KR' : locale === 'th' ? 'th-TH' : 'en-US';
   const { can } = useMenuPermissions();
   const allowRead = can('attendance-overview', 'can_read');
 
@@ -249,6 +251,34 @@ export default function AttendanceOverviewPage() {
     return out;
   }, [columns, rows]);
 
+  const valueCountsByKey = useMemo(() => {
+    const out: Record<string, Record<string, number>> = {};
+    for (const c of columns) {
+      const m: Record<string, number> = {};
+      for (const r of rows) {
+        const v = c.getValue(r);
+        m[v] = (m[v] ?? 0) + 1;
+      }
+      out[c.key] = m;
+    }
+    return out;
+  }, [columns, rows]);
+
+  const columnFilterLabels = useMemo(
+    () => ({
+      title: t('appList.filter.title'),
+      reset: t('common.reset'),
+      noValues: t('appList.filter.noValues'),
+      noMatchingValues: t('appList.filter.noMatchingValues'),
+      valueSearchPlaceholder: t('appList.filter.valueSearchPlaceholder'),
+      selectAll: t('appList.table.selectAll'),
+      deselectAll: t('appList.filter.deselectAll'),
+      emptyValue: t('common.emptyValue'),
+      selectedCountTemplate: t('appList.filter.selectedCount'),
+    }),
+    [t]
+  );
+
   const totalCount = filteredRows.length;
   const countText = useMemo(
     () => t('attendanceOverview.count').replace('{count}', String(totalCount)),
@@ -325,20 +355,6 @@ export default function AttendanceOverviewPage() {
       setDownloading(false);
     }
   }, [dateFrom, dateTo, downloading, filteredRows, locale, t, totalCount]);
-
-  const toggleColumnFilter = (key: string, value: string) => {
-    setColumnFilters((prev) => {
-      const arr = prev[key] ?? [];
-      const next = arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
-      if (next.length === 0) {
-        const cloned = { ...prev };
-        delete cloned[key];
-        return cloned;
-      }
-      return { ...prev, [key]: next };
-    });
-    setPage(1);
-  };
 
   const clearColumnFilter = (key: string) => {
     setColumnFilters((prev) => {
@@ -570,37 +586,26 @@ export default function AttendanceOverviewPage() {
                               <ChevronDown className="w-4 h-4" />
                             </button>
                             {openFilterKey === c.key && (
-                              <div
-                                ref={filterPopoverRef}
-                                className="absolute left-0 top-full mt-1 z-20 w-56 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-2 text-gray-800"
-                              >
-                                <div className="px-2 pb-2 border-b border-gray-100 flex justify-between items-center">
-                                  <span className="text-xs font-medium text-gray-600">{t('appList.filter.title')}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => clearColumnFilter(c.key)}
-                                    className="text-xs text-blue-600 hover:underline"
-                                  >
-                                    {t('common.reset')}
-                                  </button>
-                                </div>
-                                <div className="max-h-48 overflow-y-auto py-1">
-                                  {options.length === 0 ? (
-                                    <p className="px-2 py-1 text-xs text-gray-500">{t('appList.filter.noValues')}</p>
-                                  ) : (
-                                    options.map((v) => (
-                                      <label key={v} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={selected.includes(v)}
-                                          onChange={() => toggleColumnFilter(c.key, v)}
-                                          className="rounded border-gray-300"
-                                        />
-                                        <span className="text-xs truncate flex-1">{v}</span>
-                                      </label>
-                                    ))
-                                  )}
-                                </div>
+                              <div ref={filterPopoverRef} className="absolute left-0 top-full mt-1 z-20">
+                                <ColumnFilterPopover
+                                  options={options}
+                                  selected={selected}
+                                  valueCounts={valueCountsByKey[c.key] ?? {}}
+                                  numberLocale={numberLocale}
+                                  labels={columnFilterLabels}
+                                  onReset={() => clearColumnFilter(c.key)}
+                                  onSelectionChange={(next) => {
+                                    setColumnFilters((prev) => {
+                                      if (next.length === 0) {
+                                        const cloned = { ...prev };
+                                        delete cloned[c.key];
+                                        return cloned;
+                                      }
+                                      return { ...prev, [c.key]: next };
+                                    });
+                                    setPage(1);
+                                  }}
+                                />
                               </div>
                             )}
                           </div>

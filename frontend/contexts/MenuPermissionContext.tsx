@@ -32,6 +32,9 @@ type MenuPermissionContextValue = {
 
 const MenuPermissionContext = createContext<MenuPermissionContextValue | null>(null);
 const TAB_PERMISSION_ALIAS: Record<string, string> = {
+  /** RBAC app_menus 에 없음 — 급여·인사 리포트 탭은 인접 메뉴 권한으로 통제 */
+  payslip: 'payroll',
+  reports: 'hr-master-report',
   'attendance-master-manage': 'attendance',
   'attendance-annual-manage': 'attendance',
   'attendance-leave-manage': 'attendance',
@@ -50,6 +53,7 @@ const TAB_PERMISSION_ALIAS: Record<string, string> = {
   'attendance-standard-manage': 'attendance',
   'attendance-work-calendar-manage': 'attendance',
   'education-inquiry': 'hr-master-inquiry',
+  'dependent-inquiry': 'hr-master-inquiry',
   'career-inquiry': 'hr-master-inquiry',
   'hr-master-certification-inquiry': 'hr-master-inquiry',
   'hr-master-family-inquiry': 'hr-master-inquiry',
