@@ -7,6 +7,7 @@ celery_app = Celery(
     "hr_ai_agent",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
+    include=["app.tasks.job_schedule_tasks"],
 )
 
 celery_app.conf.update(
@@ -24,3 +25,7 @@ celery_app.conf.update(
 )
 
 celery_app.autodiscover_tasks(["app.tasks"])
+
+# Windows/로컬 실행 환경에서 autodiscover가 누락되는 경우를 방지하기 위해
+# 스케줄 태스크 모듈을 명시적으로 import하여 task registry를 보장합니다.
+from app.tasks import job_schedule_tasks  # noqa: F401,E402

@@ -24,15 +24,27 @@ def send_email(
     
     server = None
     try:
-        msg = MIMEMultipart()
+        if attachment:
+            # 첨부가 있는 경우: multipart/mixed 안에 multipart/alternative(plain+html)를 넣는다.
+            msg = MIMEMultipart('mixed')
+            alt = MIMEMultipart('alternative')
+            alt.attach(MIMEText(body, 'plain', 'utf-8'))
+            if html_body:
+                alt.attach(MIMEText(html_body, 'html', 'utf-8'))
+            msg.attach(alt)
+        elif html_body:
+            # 첨부가 없고 HTML 본문이 있는 경우: multipart/alternative로 전송해야
+            # 일부 메일 클라이언트에서 HTML이 첨부파일처럼 보이지 않는다.
+            msg = MIMEMultipart('alternative')
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        else:
+            msg = MIMEText(body, 'plain', 'utf-8')
+
         msg['From'] = settings.SMTP_FROM or settings.SMTP_USER
         msg['To'] = to
         msg['Subject'] = subject
-        
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
-        if html_body:
-            msg.attach(MIMEText(html_body, 'html', 'utf-8'))
-        
+
         if attachment:
             with open(attachment, 'rb') as f:
                 part = MIMEBase('application', 'octet-stream')

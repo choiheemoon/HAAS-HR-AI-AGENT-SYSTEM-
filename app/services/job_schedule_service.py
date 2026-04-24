@@ -18,7 +18,8 @@ from app.services.attendance_time_day_service import AttendanceTimeDayService
 from app.services.employee_hr_analytics_service import build_hr_analytics_summary
 from app.services.system_rbac_service import SystemRbacService
 from app.utils.email_sender import send_email
-from app.utils.simple_pdf import write_simple_text_pdf
+from app.utils.html_to_pdf import try_write_html_as_pdf
+from app.utils.simple_pdf import write_hr_report_pdf, write_simple_text_pdf
 
 JOB_TYPE_ATTENDANCE_AGGREGATE = "attendance_ot_allowance_aggregate"
 JOB_TYPE_PAYROLL_MONTHLY_AGGREGATE = "payroll_master_monthly_aggregate"
@@ -358,13 +359,6 @@ class JobScheduleService:
         allowed = SystemRbacService(self.db).get_user_company_ids(actor.id, current_user=actor)
         summary = build_hr_analytics_summary(self.db, allowed, company_id, trend_months=months)
         company_name = self._company_display_name(company_id)
-        lines = [
-            f"회사명: {company_name}",
-            f"기간유형: {period_type}",
-            f"기준일: {summary.get('as_of')}",
-            f"재직 인원: {int((summary.get('totals') or {}).get('employees_active', 0))}",
-            f"전체 인원: {int((summary.get('totals') or {}).get('employees_all', 0))}",
-        ]
         html_report = self._build_hr_report_html(
             summary=summary,
             company_name=company_name,
@@ -380,7 +374,15 @@ class JobScheduleService:
             Path(report_path).write_text(html_report, encoding="utf-8")
         else:
             report_name = f"hr_report_{ts}.pdf"
-            report_path = write_simple_text_pdf(str(report_dir / report_name), "HR Scheduled Report", lines)
+            pdf_path = str(report_dir / report_name)
+            # HTML 템플릿과 동일한 마크업을 Chromium으로 PDF화 (실패 시 ReportLab 폴백)
+            report_path = try_write_html_as_pdf(pdf_path, html_report) or write_hr_report_pdf(
+                pdf_path,
+                summary=summary,
+                company_name=company_name,
+                period_type=period_type,
+                months=months,
+            )
         subject = "[HR AI AGENT] 인사 리포트"
         body = "예약 실행된 인사 리포트를 전송합니다."
         for email in recipient_emails:

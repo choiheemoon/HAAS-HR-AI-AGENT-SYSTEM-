@@ -47,6 +47,8 @@ numpy==1.26.2
 matplotlib==3.8.2
 seaborn==0.13.0
 plotly==5.18.0
+reportlab==4.0.4
+playwright==1.49.1
 
 # File Storage
 boto3==1.29.7
