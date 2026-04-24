@@ -122,6 +122,8 @@ export default function ScheduleManagePage() {
   const [lastRunMessageBySchedule, setLastRunMessageBySchedule] = useState<Record<number, string>>({});
   const [runsModalOpen, setRunsModalOpen] = useState(false);
   const [runsModalSchedule, setRunsModalSchedule] = useState<ScheduleRow | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
   const [form, setForm] = useState(defaultForm());
 
   const selectedUserOk = useMemo(() => form.run_as_user_id > 0, [form.run_as_user_id]);
@@ -439,6 +441,32 @@ export default function ScheduleManagePage() {
     }).length;
     return { total, enabled, running, failed };
   }, [rows, lastRunStatusBySchedule]);
+
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const status = runStatusLabel(r.id).toLowerCase();
+      const text = `${r.name} ${jobTypeLabel(r.job_type)} ${r.time_local} ${r.timezone} ${status}`.toLowerCase();
+      return text.includes(q);
+    });
+  }, [rows, searchQuery, lastRunStatusBySchedule]);
+
+  const PAGE_SIZE = 5;
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, currentPage]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   return (
     <div className="space-y-4">
@@ -792,19 +820,27 @@ export default function ScheduleManagePage() {
       <div className="bg-white border rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-medium">{t('schedule.manage.list')}</h3>
-          <button type="button" className="text-sm px-2 py-1 border rounded" onClick={() => void load()}>
-            {t('schedule.manage.reload')}
-          </button>
+          <div className="flex items-center gap-2">
+            <input
+              className="text-sm border rounded px-2 py-1 w-52"
+              placeholder={t('schedule.manage.searchPlaceholder')}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <button type="button" className="text-sm px-2 py-1 border rounded" onClick={() => void load()}>
+              {t('schedule.manage.reload')}
+            </button>
+          </div>
         </div>
         {loading ? (
           <div className="text-sm text-gray-500">{t('common.loading')}</div>
         ) : (
           <div className="space-y-2">
-            {rows.map((r) => (
+            {pagedRows.map((r) => (
               <div key={r.id} className="border rounded-lg p-3 space-y-2 bg-white">
                 <div className="flex items-start justify-between gap-3">
                   <div className="text-sm flex-1 min-w-0 space-y-1">
-                    <div className="font-medium">{r.name}</div>
+                    <div className="text-base font-semibold tracking-tight">{r.name}</div>
                     <div className="text-gray-600">
                       {jobTypeLabel(r.job_type)} / {r.time_local} / {r.timezone}
                     </div>
@@ -904,7 +940,32 @@ export default function ScheduleManagePage() {
                 )}
               </div>
             ))}
-            {rows.length === 0 && <div className="text-sm text-gray-500">{t('schedule.manage.empty')}</div>}
+            {filteredRows.length === 0 && <div className="text-sm text-gray-500">{t('schedule.manage.empty')}</div>}
+            {filteredRows.length > 0 && (
+              <div className="flex items-center justify-between pt-1 text-xs text-gray-600">
+                <div>
+                  {t('schedule.manage.page')} {currentPage} / {totalPages}
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    className="px-2 py-1 border rounded disabled:opacity-50"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    {t('schedule.manage.prev')}
+                  </button>
+                  <button
+                    type="button"
+                    className="px-2 py-1 border rounded disabled:opacity-50"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    {t('schedule.manage.next')}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,19 +1,25 @@
 """인증 서비스"""
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from typing import Optional
 from datetime import datetime, timedelta
 import uuid
 import secrets
 import string
+import threading
 from jose import JWTError, jwt
 import bcrypt
 from app.models.user import User
 from app.config import settings
+from app.utils.email_sender import send_email
 
 
 class AuthService:
     """인증 서비스"""
+    _forgot_password_attempts: dict[str, list[float]] = {}
+    _forgot_password_lock = threading.Lock()
+    _forgot_password_window_seconds = 10 * 60
+    _forgot_password_max_attempts = 5
     
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -73,6 +79,31 @@ class AuthService:
     def _generate_temporary_password(length: int = 10) -> str:
         alphabet = string.ascii_letters + string.digits
         return "".join(secrets.choice(alphabet) for _ in range(max(8, length)))
+
+    @staticmethod
+    def _normalize_identity_text(value: str) -> str:
+        # 공백 차이를 제거하고 대소문자를 정규화해 이름/이메일 비교 오탐을 줄입니다.
+        return " ".join((value or "").strip().split()).casefold()
+
+    @classmethod
+    def _check_forgot_password_rate_limit(cls, request_key: str) -> bool:
+        now_ts = datetime.utcnow().timestamp()
+        threshold = now_ts - cls._forgot_password_window_seconds
+        key = request_key.strip().lower() or "anonymous"
+
+        with cls._forgot_password_lock:
+            records = cls._forgot_password_attempts.get(key, [])
+            records = [ts for ts in records if ts >= threshold]
+            if len(records) >= cls._forgot_password_max_attempts:
+                cls._forgot_password_attempts[key] = records
+                return False
+            records.append(now_ts)
+            cls._forgot_password_attempts[key] = records
+            return True
+
+    def _consume_forgot_password_dummy_cost(self) -> None:
+        # 계정 존재 여부가 처리 시간으로 유추되지 않도록 더미 해싱을 수행합니다.
+        _ = self.get_password_hash(self._generate_temporary_password())
     
     def register_user(
         self,
@@ -206,11 +237,91 @@ class AuthService:
             return db.query(User).filter(User.id == int(subject)).first()
         return db.query(User).filter(User.username == str(subject)).first()
 
-    def issue_temporary_password_by_email(self, db: Session, email: str) -> str:
-        user = db.query(User).filter(User.email == email).first()
+    def issue_temporary_password_by_identity(
+        self,
+        db: Session,
+        email: str,
+        full_name: str,
+        request_key: Optional[str] = None,
+    ) -> bool:
+        if not self._check_forgot_password_rate_limit(request_key or "forgot-password"):
+            raise RuntimeError("요청 횟수가 너무 많습니다. 잠시 후 다시 시도해주세요.")
+
+        normalized_email = self._normalize_identity_text(email)
+        normalized_name = self._normalize_identity_text(full_name)
+        user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
         if not user:
-            raise ValueError("해당 이메일로 등록된 계정을 찾을 수 없습니다.")
+            self._consume_forgot_password_dummy_cost()
+            return False
+
+        if self._normalize_identity_text(user.full_name or user.username) != normalized_name:
+            self._consume_forgot_password_dummy_cost()
+            return False
+
         temp_password = self._generate_temporary_password()
         user.hashed_password = self.get_password_hash(temp_password)
-        db.commit()
-        return temp_password
+
+        subject = "[HAAS] 임시비밀번호 발급 안내"
+        body = (
+            f"{user.full_name or user.username}님,\n\n"
+            "비밀번호 분실 요청으로 임시비밀번호가 발급되었습니다.\n"
+            f"임시비밀번호: {temp_password}\n\n"
+            "보안을 위해 로그인 직후 반드시 비밀번호를 변경해주세요.\n"
+            "요청하신 적이 없다면 관리자에게 즉시 문의해주세요.\n\n"
+            "감사합니다.\n"
+            "HAAS"
+        )
+        html_body = f"""
+        <html>
+          <body style="margin:0; padding:0; background:#f3f8fc; font-family:Arial,'Apple SD Gothic Neo','Malgun Gothic',sans-serif; color:#1f2937;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:24px 12px;">
+              <tr>
+                <td align="center">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px; background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; overflow:hidden;">
+                    <tr>
+                      <td style="padding:22px 24px; background:linear-gradient(90deg,#0ea5e9,#0284c7); color:#ffffff;">
+                        <div style="font-size:22px; font-weight:700; letter-spacing:0.2px;">HAAS</div>
+                        <div style="margin-top:6px; font-size:14px; opacity:0.95;">임시비밀번호 발급 안내</div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:24px;">
+                        <p style="margin:0 0 12px; font-size:16px; line-height:1.6;">
+                          <strong>{user.full_name or user.username}</strong>님, 안녕하세요.
+                        </p>
+                        <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#374151;">
+                          비밀번호 분실 요청으로 임시비밀번호가 발급되었습니다.<br/>
+                          아래 비밀번호로 로그인하신 뒤, 반드시 새 비밀번호로 변경해주세요.
+                        </p>
+                        <div style="margin:0 0 18px; padding:14px 16px; border:1px dashed #0ea5e9; background:#f0f9ff; border-radius:10px;">
+                          <div style="font-size:12px; color:#0369a1; margin-bottom:8px; font-weight:700;">임시비밀번호</div>
+                          <div style="font-size:24px; font-weight:800; letter-spacing:1px; color:#0f172a; font-family:Consolas,'Courier New',monospace;">
+                            {temp_password}
+                          </div>
+                        </div>
+                        <div style="padding:12px 14px; border-radius:8px; background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; font-size:13px; line-height:1.6;">
+                          요청하신 적이 없다면 계정 보안을 위해 관리자에게 즉시 문의해주세요.
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:14px 24px; background:#f9fafb; border-top:1px solid #e5e7eb; font-size:12px; color:#6b7280; line-height:1.6;">
+                        본 메일은 발신전용입니다. 문의사항은 시스템 관리자에게 연락해주세요.
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </body>
+        </html>
+        """
+
+        try:
+            send_email(to=user.email, subject=subject, body=body, html_body=html_body)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        return True

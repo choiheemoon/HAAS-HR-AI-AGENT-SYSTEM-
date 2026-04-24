@@ -2,7 +2,7 @@
 import logging
 import traceback
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -372,11 +372,11 @@ class OnboardingSetupRequest(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+    full_name: str
 
 
 class ForgotPasswordResponse(BaseModel):
     message: str
-    temporary_password: str
 
 
 @router.put("/me/password", response_model=UserResponse)
@@ -442,17 +442,33 @@ def run_onboarding_setup(
 @router.post("/forgot-password/temp", response_model=ForgotPasswordResponse)
 def issue_temporary_password(
     body: ForgotPasswordRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     auth_service = AuthService()
     try:
-        temp_password = auth_service.issue_temporary_password_by_email(db, body.email)
-        return ForgotPasswordResponse(
-            message="임시비밀번호가 발급되었습니다. 로그인 후 반드시 비밀번호를 변경해주세요.",
-            temporary_password=temp_password,
+        request_ip = request.client.host if request.client else "unknown"
+        is_matched = auth_service.issue_temporary_password_by_identity(
+            db=db,
+            email=body.email,
+            full_name=body.full_name,
+            request_key=f"{request_ip}:{body.email.strip().lower()}",
         )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        if not is_matched:
+            raise HTTPException(
+                status_code=400,
+                detail="입력하신 정보가 일치하지 않습니다.",
+            )
+        return ForgotPasswordResponse(
+            message=(
+                "입력하신 정보가 일치하여 등록된 이메일 주소로 임시비밀번호를 발송했습니다. "
+                "로그인 후 반드시 비밀번호를 변경해주세요."
+            ),
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
     except Exception as e:
         db.rollback()
         raise HTTPException(

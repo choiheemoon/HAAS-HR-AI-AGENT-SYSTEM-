@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { LogIn, Mail, Lock, User, CheckCircle, KeyRound } from 'lucide-react';
-import api, { apiClient } from '@/lib/api';
+import { LogIn, Lock, User, CheckCircle } from 'lucide-react';
+import api from '@/lib/api';
 import { setToken, setUser, isAuthenticated } from '@/lib/auth';
 
 /** FastAPI/Starlette: detail may be string | { msg, loc, ... }[] */
@@ -41,10 +41,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [registered, setRegistered] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotLoading, setForgotLoading] = useState(false);
-  const [tempPassword, setTempPassword] = useState('');
-  const [forgotMessage, setForgotMessage] = useState('');
 
   useEffect(() => {
     // 이미 로그인된 경우 대시보드로 이동
@@ -109,26 +105,6 @@ export default function LoginPage() {
       setError(formatApiErrorDetail(err, '로그인에 실패했습니다.'));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleIssueTempPassword = async () => {
-    setError('');
-    setForgotMessage('');
-    setTempPassword('');
-    if (!forgotEmail.trim()) {
-      setError('임시비밀번호를 받을 이메일을 입력해주세요.');
-      return;
-    }
-    setForgotLoading(true);
-    try {
-      const res = await apiClient.issueTemporaryPassword(forgotEmail.trim());
-      setForgotMessage(res.data?.message || '임시비밀번호가 발급되었습니다.');
-      setTempPassword(res.data?.temporary_password || '');
-    } catch (err: any) {
-      setError(formatApiErrorDetail(err, '임시비밀번호 발급에 실패했습니다.'));
-    } finally {
-      setForgotLoading(false);
     }
   };
 
@@ -216,38 +192,13 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="mt-6 border-t pt-5">
-          <h3 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-2">
-            <KeyRound className="w-4 h-4" />
-            <span>비밀번호 분실 (임시비밀번호 발급)</span>
-          </h3>
-          <div className="space-y-2">
-            <input
-              type="email"
-              value={forgotEmail}
-              onChange={(e) => setForgotEmail(e.target.value)}
-              placeholder="가입한 이메일 입력"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
-            />
-            <button
-              type="button"
-              onClick={handleIssueTempPassword}
-              disabled={forgotLoading}
-              className="w-full bg-gray-700 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-            >
-              {forgotLoading ? '임시비밀번호 발급 중...' : '임시비밀번호 발급'}
-            </button>
-            {forgotMessage && (
-              <div className="p-2 bg-green-50 border border-green-200 text-green-700 rounded text-xs">
-                {forgotMessage}
-              </div>
-            )}
-            {tempPassword && (
-              <div className="p-2 bg-amber-50 border border-amber-200 text-amber-800 rounded text-xs">
-                임시비밀번호: <span className="font-mono font-semibold">{tempPassword}</span>
-              </div>
-            )}
-          </div>
+        <div className="mt-6 border-t pt-5 text-center">
+          <p className="text-sm text-gray-600">
+            비밀번호를 잊으셨나요?{' '}
+            <Link href="/forgot-password" className="text-primary-600 hover:text-primary-700 font-medium">
+              임시비밀번호 발급
+            </Link>
+          </p>
         </div>
       </div>
     </div>

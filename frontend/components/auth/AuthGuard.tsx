@@ -14,7 +14,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   const [loading, setLoading] = useState(true);
 
   // 인증이 필요 없는 페이지
-  const publicPaths = ['/login', '/register'];
+  const publicPaths = ['/login', '/register', '/forgot-password'];
 
   useEffect(() => {
     const checkAuth = () => {

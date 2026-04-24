@@ -15,7 +15,7 @@ export default function LayoutWrapper({ children }: LayoutWrapperProps) {
   const pathname = usePathname();
   
   // 인증이 필요 없는 페이지 (로그인, 회원가입, 공개 채용공고, 증명서 직원 전달)
-  const publicPaths = ['/login', '/register', '/certificate-delivery'];
+  const publicPaths = ['/login', '/register', '/forgot-password', '/certificate-delivery'];
   const isPublicPath = publicPaths.includes(pathname) || (pathname && pathname.startsWith('/jobs/'));
 
   if (isPublicPath) {

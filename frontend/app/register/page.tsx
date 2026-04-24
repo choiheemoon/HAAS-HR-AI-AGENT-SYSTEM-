@@ -220,6 +220,12 @@ export default function RegisterPage() {
               로그인
             </Link>
           </p>
+          <p className="text-sm text-gray-600 mt-2">
+            비밀번호를 잊으셨나요?{' '}
+            <Link href="/forgot-password" className="text-primary-600 hover:text-primary-700 font-medium">
+              임시비밀번호 발급
+            </Link>
+          </p>
         </div>
       </div>
     </div>
